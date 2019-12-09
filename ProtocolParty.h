@@ -25,6 +25,7 @@ private:
     int times; //number of times to run the run function
     int iteration; //number of the current iteration
 
+    boost::asio::io_service io_service;
     vector<PrgFromOpenSSLAES> prgs;
 
     TemplateField<FieldType> *field;
@@ -71,7 +72,9 @@ private:
     FieldType reconstructShare(vector<FieldType>& x, int d);
 
     void DNHonestMultiplication(FieldType *a, FieldType *b, vector<FieldType> &cToFill, int numOfTupples);
-    void inverse(FieldType *a, vector<FieldType> &bToFill, int numOfElements);
+    void inverse(FieldType *a, vector<FieldType> &bToFill);
+
+    void randomBit(vector<FieldType> &bToFill);
 
 public:
     ProtocolParty(int argc, char* argv[]);
@@ -114,7 +117,7 @@ public:
 
 
 template <class FieldType>
-ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("Comparison", argc, argv)
+ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("Comparison", argc, argv, false)
 {
 
     partyId = stoi(this->getParser().getValueByKey(arguments, "partyID"));
@@ -135,9 +138,13 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
         field = new TemplateField<FieldType>(0);
     }
 
-
     N = numParties;
     T = (numParties+1)/2 - 1;
+
+
+    MPCCommunication comm;
+    string partiesFile = this->getParser().getValueByKey(arguments, "partiesFile");
+    parties = comm.setCommunication(io_service, partyId, N, partiesFile);
 
 
     prgs.resize(numThreads);
@@ -219,26 +226,46 @@ void ProtocolParty<FieldType>::runOffline() {
 template <class FieldType>
 void ProtocolParty<FieldType>::runOnline() {
 
-    vector<FieldType> element(1);
-    vector<FieldType> inverseArr(1);
+    cout<<"*********** check inverse *************"<<endl;
+    vector<FieldType> element(10);
+    vector<FieldType> inverseArr(10);
     element[0] = randomSharesArray[randomSharesOffset++];
     cout<<"share of element is " << element[0]<<endl;
-    vector<FieldType> openedElement(1);
+
+    vector<FieldType> openedElement(10);
     openShare(element, openedElement, T);
     cout<<"opened element is "<<openedElement[0]<<endl;
 
-    inverse(element.data(), inverseArr, 1);
+    inverse(element.data(), inverseArr);
     cout<<"element inverse is " << inverseArr[0]<<endl;
 
 
-    vector<FieldType> openedInverse(1);
+    vector<FieldType> openedInverse(10);
     openShare(inverseArr, openedInverse, T);
     cout<<"opened element inverse is "<<openedInverse[0]<<endl;
 
-    auto res = element[0] * inverseArr[0];
+    for (int i=0; i<10; i++) {
+        auto res = openedElement[i] * openedInverse[i];
 
-    cout<<"the output is " << res<< endl;
+        cout << "the output is " << res << endl;
+    }
 
+    cout<<"*********** check RANDOM BIT *************"<<endl;
+    vector<FieldType> bits(10);
+    vector<FieldType> openBits(10);
+    randomBit(bits);
+
+    cout<<"shares of random bits:"<<endl;
+    for (int i=0; i<10; i++){
+        cout<<bits[i]<<" ";
+    }
+    cout<<endl;
+    openShare(bits, openBits, T);
+    cout<<"actual random bits:"<<endl;
+    for (int i=0; i<10; i++){
+        cout<<openBits[i]<<" ";
+    }
+    cout<<endl;
 
 //    auto t1 = high_resolution_clock::now();
 //    timer->startSubTask("inputPhase", iteration);
@@ -789,8 +816,9 @@ void ProtocolParty<FieldType>::DNHonestMultiplication(FieldType *a, FieldType *b
 }
 
 template <class FieldType>
-void ProtocolParty<FieldType>::inverse(FieldType *a, vector<FieldType> &bToFill, int numOfElements) {
+void ProtocolParty<FieldType>::inverse(FieldType *a, vector<FieldType> &bToFill) {
 
+    int numOfElements = bToFill.size();
     vector<FieldType> raShares(numOfElements);//hold both in the same vector to send in one batch
     vector<FieldType> openedRAShares(numOfElements);
     FieldType one(1);
@@ -800,24 +828,68 @@ void ProtocolParty<FieldType>::inverse(FieldType *a, vector<FieldType> &bToFill,
     for (int k = 0; k < numOfElements; k++)//go over only the logit gates
     {
         //compute the share of r*a
-        cout<<"r share = "<<randomSharesArray[randomSharesOffset + k]<<endl;
         raShares[k] = a[k]*randomSharesArray[randomSharesOffset + k];
-        cout<<"r*a share = "<<raShares[k]<<endl;
+//        cout<<"r*a share = "<<raShares[k]<<endl;
     }
 
     openShare(raShares, openedRAShares, 2*T);
-    cout<<"ra open = "<<openedRAShares[0]<<endl;
+//    cout<<"ra open = "<<openedRAShares[0]<<endl;
     for (int k = 0; k < numOfElements; k++)//go over only the logit gates
     {
         //compute the share of r*a
-        cout<<"inverse of r = "<< (one / openedRAShares[k])<<endl;
+//        cout<<"inverse of r = "<< (one / openedRAShares[k])<<endl;
         bToFill[k] = (one / openedRAShares[k]) * randomSharesArray[randomSharesOffset + k];
-        cout<<"inverse of a share = "<< bToFill[k]<<endl;
+//        cout<<"inverse of a share = "<< bToFill[k]<<endl;
     }
 
     randomSharesOffset += numOfElements;
 
 }
+
+
+template <class FieldType>
+void ProtocolParty<FieldType>::randomBit(vector<FieldType> &bToFill) {
+
+    int numOfElements = bToFill.size();
+    cout<<"numOfElements = "<<numOfElements<<endl;
+    vector<FieldType> rSquareShares(numOfElements);//hold both in the same vector to send in one batch
+    vector<FieldType> openedRSquareShares(numOfElements);
+    FieldType one(1);
+    FieldType twoInv(2);
+    twoInv = one / twoInv;
+
+    FieldType r;
+    cout<<"randomSharesOffset = "<<randomSharesOffset<<endl;
+    //generate the shares for x+a and y+b. do it in the same array to send once
+    for (int k = 0; k < numOfElements; k++)//go over only the logit gates
+    {
+        //compute the share of r*a
+        r = randomSharesArray[randomSharesOffset + k];
+        rSquareShares[k] = r*r;
+    }
+
+    openShare(rSquareShares, openedRSquareShares, 2*T);
+
+    vector<FieldType> roots(numOfElements);
+    for (int k = 0; k < numOfElements; k++)//go over only the logit gates
+    {
+        roots[k] = openedRSquareShares[k].sqrt();
+
+    }
+
+    vector<FieldType> rootsInverse(numOfElements);
+    inverse(roots.data(), rootsInverse);
+
+    for (int k = 0; k < numOfElements; k++)
+    {
+        bToFill[k] = roots[k] * rootsInverse[k];
+        bToFill[k] = (bToFill[k] + one) * twoInv;
+    }
+
+    randomSharesOffset += numOfElements;
+
+}
+
 
 
 template <class FieldType>
