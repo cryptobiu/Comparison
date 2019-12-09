@@ -13,7 +13,7 @@
 
 using namespace std;
 
-#define flag_print false
+#define flag_print true
 #define flag_print_timings true
 
 template <class FieldType>
@@ -30,6 +30,9 @@ private:
     TemplateField<FieldType> *field;
     vector<shared_ptr<ProtocolPartyData>> parties;
     Measurement* timer;
+
+    vector<FieldType> alpha; // N distinct non-zero field elements
+    vector<FieldType> beta;
     VDM<FieldType> matrix_vand;
     VDMTranspose<FieldType> matrix_vand_transpose;
     HIM<FieldType> matrix_for_interpolate;
@@ -116,7 +119,7 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
 
     partyId = stoi(this->getParser().getValueByKey(arguments, "partyID"));
 
-    numParties = stoi(this->getParser().getValueByKey(arguments, "numParties"));
+    numParties = stoi(this->getParser().getValueByKey(arguments, "partiesNumber"));
     numThreads = stoi(this->getParser().getValueByKey(arguments, "numThreads"));
 
     string fieldType = this->getParser().getValueByKey(arguments, "fieldType");
@@ -219,13 +222,18 @@ void ProtocolParty<FieldType>::runOnline() {
     vector<FieldType> element(1);
     vector<FieldType> inverseArr(1);
     element[0] = randomSharesArray[randomSharesOffset++];
+    cout<<"share of element is " << element[0]<<endl;
+    vector<FieldType> openedElement(1);
+    openShare(element, openedElement, T);
+    cout<<"opened element is "<<openedElement[0]<<endl;
 
     inverse(element.data(), inverseArr, 1);
+    cout<<"element inverse is " << inverseArr[0]<<endl;
 
-    vector<FieldType> openedElement(1);
+
     vector<FieldType> openedInverse(1);
-    openShare(element, openedElement, T);
     openShare(inverseArr, openedInverse, T);
+    cout<<"opened element inverse is "<<openedInverse[0]<<endl;
 
     auto res = element[0] * inverseArr[0];
 
@@ -255,14 +263,14 @@ template <class FieldType>
 void ProtocolParty<FieldType>::initializationPhase() {
 //    bigR.resize(1);
 //
-//    beta.resize(1);
+    beta.resize(1);
     y_for_interpolate.resize(N);
 
-//    alpha.resize(N); // N distinct non-zero field elements
+    alpha.resize(N); // N distinct non-zero field elements
 //    vector<FieldType> alpha1(N-T);
 //    vector<FieldType> alpha2(T);
 //
-//    beta[0] = field->GetElement(0); // zero of the field
+    beta[0] = field->GetElement(0); // zero of the field
     matrix_for_interpolate.allocate(1,N, field);
 //
 //
@@ -279,10 +287,10 @@ void ProtocolParty<FieldType>::initializationPhase() {
 //    matrix_him.InitHIM();
 
     // N distinct non-zero field elements
-//    for(int i=0; i<N; i++)
-//    {
-//        alpha[i]=field->GetElement(i+1);
-//    }
+    for(int i=0; i<N; i++)
+    {
+        alpha[i]=field->GetElement(i+1);
+    }
 //
 //    for(int i = 0; i < N-T; i++)
 //    {
@@ -295,7 +303,7 @@ void ProtocolParty<FieldType>::initializationPhase() {
 //
 //    m.InitHIMByVectors(alpha1, alpha2);
 //
-//    matrix_for_interpolate.InitHIMByVectors(alpha, beta);
+    matrix_for_interpolate.InitHIMByVectors(alpha, beta);
 //
 //    vector<FieldType> alpha_until_t(T + 1);
 //    vector<FieldType> alpha_from_t(N - 1 - T);
@@ -343,7 +351,6 @@ void ProtocolParty<FieldType>::initializationPhase() {
 template <class FieldType>
 bool ProtocolParty<FieldType>::preparationPhase() {
 
-    int iterations =   (5 + field->getElementSizeInBytes() - 1) / field->getElementSizeInBytes();
     int keysize = 16/field->getElementSizeInBytes() + 1;
 
     int numOfRandomShares = 10*keysize + 1;
@@ -402,7 +409,7 @@ void ProtocolParty<FieldType>::generateRandom2TAndTShares(int numOfRandomPairs, 
 
     auto duration = duration_cast<milliseconds>(t2-t1).count();
     if(flag_print_timings) {
-        cout << "time in milliseconds header: " << duration << endl;
+        cout << "time in milliseconds generateRandom2TAndTShares: " << duration << endl;
     }
     t1 = high_resolution_clock::now();
 
@@ -476,15 +483,15 @@ void ProtocolParty<FieldType>::generateRandom2TAndTShares(int numOfRandomPairs, 
         cout << "time in milliseconds copy: " << duration << endl;
     }
 
-    t1 = high_resolution_clock::now();
+//    t1 = high_resolution_clock::now();
 //    batchConsistencyCheckOfShares(randomElementsOnlyTshares);
-
-    t2 = high_resolution_clock::now();
-
-    duration = duration_cast<milliseconds>(t2-t1).count();
-    if(flag_print_timings) {
-        cout << "time in milliseconds batch consistency: " << duration << endl;
-    }
+//
+//    t2 = high_resolution_clock::now();
+//
+//    duration = duration_cast<milliseconds>(t2-t1).count();
+//    if(flag_print_timings) {
+//        cout << "time in milliseconds batch consistency: " << duration << endl;
+//    }
 
 }
 
@@ -492,7 +499,6 @@ void ProtocolParty<FieldType>::generateRandom2TAndTShares(int numOfRandomPairs, 
 template <class FieldType>
 void ProtocolParty<FieldType>::generateRandomShares(int numOfRandoms, vector<FieldType> &randomElementsToFill) {
     int index = 0;
-    int robin = 0;
     int no_random = numOfRandoms;
 
     vector<FieldType> x1(N),y1(N), x2(N),y2(N), t1(N), r1(N), t2(N), r2(N);
@@ -794,15 +800,19 @@ void ProtocolParty<FieldType>::inverse(FieldType *a, vector<FieldType> &bToFill,
     for (int k = 0; k < numOfElements; k++)//go over only the logit gates
     {
         //compute the share of r*a
+        cout<<"r share = "<<randomSharesArray[randomSharesOffset + k]<<endl;
         raShares[k] = a[k]*randomSharesArray[randomSharesOffset + k];
+        cout<<"r*a share = "<<raShares[k]<<endl;
     }
 
     openShare(raShares, openedRAShares, 2*T);
-
+    cout<<"ra open = "<<openedRAShares[0]<<endl;
     for (int k = 0; k < numOfElements; k++)//go over only the logit gates
     {
         //compute the share of r*a
+        cout<<"inverse of r = "<< (one / openedRAShares[k])<<endl;
         bToFill[k] = (one / openedRAShares[k]) * randomSharesArray[randomSharesOffset + k];
+        cout<<"inverse of a share = "<< bToFill[k]<<endl;
     }
 
     randomSharesOffset += numOfElements;
