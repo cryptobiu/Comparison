@@ -49,6 +49,10 @@ private:
     vector<FieldType> randomSharesArray;
     int randomSharesOffset = 0;
 
+    vector<FieldType> randomsToLSB;
+    vector<vector<FieldType>> bitsToLSB;
+    int randomWithBitsOffset;
+
 
     void initializationPhase();
     bool preparationPhase();
@@ -92,11 +96,13 @@ private:
 
     FieldType bitwiseLessThan(FieldType* a, FieldType* b, int size);
 
-    void geneateRandomWithBits(int size, FieldType & randomToFill, vector<FieldType> & bitsToFill);
+    void geneateRandomWithBits(int size, vector<FieldType> & randomToFill, vector<vector<FieldType>> & bitsToFill, int numRandoms);
     void getBits(FieldType x, vector<FieldType> & bits, int size);
     FieldType LSB(FieldType & a, int bitsSize);
 
     FieldType compare(FieldType & a, FieldType & b, int bitSize);
+
+    void comparePhase();
 
 public:
     ProtocolParty(int argc, char* argv[]);
@@ -191,14 +197,6 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
     if(flag_print_timings) {
         cout << "time in milliseconds initializationPhase: " << duration << endl;
     }
-//
-//
-//    shiftbyOne.resize(securityParamter);
-//    for(int i=0; i<securityParamter; i++){
-//        shiftbyOne[i] = 1 << i;
-//    }
-//
-//
 
 }
 
@@ -250,143 +248,191 @@ void ProtocolParty<FieldType>::runOffline() {
 template <class FieldType>
 void ProtocolParty<FieldType>::runOnline() {
 
-    cout<<"*********** check inverse *************"<<endl;
-    vector<FieldType> element(10);
-    vector<FieldType> inverseArr(10);
-    for (int i=0; i<10; i++) {
-        element[i] = randomSharesArray[randomSharesOffset++];
+
+
+    auto t1 = high_resolution_clock::now();
+    timer->startSubTask("inputPhase", iteration);
+    comparePhase();
+    timer->endSubTask("inputPhase", iteration);
+    auto t2 = high_resolution_clock::now();
+    auto duration = duration_cast<milliseconds>(t2-t1).count();
+
+    if(flag_print_timings) {
+        cout << "time in milliseconds inputPhase: " << duration << endl;
     }
 
-    cout<<"share of random elements: "<<endl;
-    for (int i=0; i<10; i++) {
-        cout<<element[i]<<" ";
-    }
-    cout<<endl;
+//    cout<<"*********** check inverse *************"<<endl;
+//    vector<FieldType> element(10);
+//    vector<FieldType> inverseArr(10);
+//    for (int i=0; i<10; i++) {
+//        element[i] = randomSharesArray[randomSharesOffset++];
+//    }
+//
+//    cout<<"share of random elements: "<<endl;
+//    for (int i=0; i<10; i++) {
+//        cout<<element[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    vector<FieldType> openedElement(10);
+//    openShare(element, openedElement, T);
+//    cout<<"opened elements: "<<endl;
+//    for (int i=0; i<10; i++) {
+//        cout<<openedElement[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    inverse(element.data(), inverseArr);
+//    cout<<"elements inverse: " << endl;
+//    for (int i=0; i<10; i++) {
+//        cout<<inverseArr[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    vector<FieldType> openedInverse(10);
+//    openShare(inverseArr, openedInverse, T);
+//    cout<<"opened elements inverse: "<<endl;
+//    for (int i=0; i<10; i++) {
+//        cout<<openedInverse[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//
+//    for (int i=0; i<10; i++) {
+//        auto res = openedElement[i] * openedInverse[i];
+//
+//        cout << "the output is " << res << endl;
+//    }
+//
+//    cout<<"*********** check RANDOM BIT *************"<<endl;
+//
+//    vector<FieldType> bits(8);
+//    checkRandomBit(bits);
+//
+//    cout<<"*********** check UNBOUNDED FAN-IN OR*************"<<endl;
+//
+//    checkUnboundedOR(bits.data(), 8);
+//    checkUnboundedOR(bits.data(), 2);
+//    checkUnboundedOR(bits.data(), 4);
+//    checkUnboundedOR(bits.data(), 6);
+//
+//    cout<<"*********** check PREFIX OR*************"<<endl;
+//
+//    vector<FieldType> allBits(31);
+//    vector<FieldType> allBitsPrefix(31);
+//    vector<FieldType> allBitsPrefixOpened(31);
+//    randomBit(allBits);
+//
+//    openShare(allBits, allBitsPrefixOpened, T);
+//
+//    cout<<"all bits:"<<endl;
+//    for (int i=0; i<31; i++){
+//        cout<<allBitsPrefixOpened[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    prefixOR(allBits.data(), allBitsPrefix);
+//    openShare(allBitsPrefix, allBitsPrefixOpened, T);
+//
+//    cout<<"prefix bits:"<<endl;
+//    for (int i=0; i<31; i++){
+//        cout<<allBitsPrefixOpened[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    cout<<"*********** check BITWISE LESS THAN*************"<<endl;
+//    vector<FieldType> a(31);
+//    vector<FieldType> b(31);
+//    vector<FieldType> aOpened(31);
+//    vector<FieldType> bOpened(31);
+//    randomBit(a);
+//    randomBit(b);
+//
+//    openShare(a, aOpened, T);
+//    cout<<"a:"<<endl;
+//    for (int i=0; i<31; i++){
+//        cout<<aOpened[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    openShare(b, bOpened, T);
+//    cout<<"b:"<<endl;
+//    for (int i=0; i<31; i++){
+//        cout<<bOpened[i]<<" ";
+//    }
+//    cout<<endl;
+//
+//    vector<FieldType> resV(1);
+//    resV[0] = bitwiseLessThan(a.data(), bOpened.data(), a.size());
+//
+//    vector<FieldType> resVOpened(1);
+//    openShare(resV, resVOpened, T);
+//
+//    cout<<"a < b ? "<<resVOpened[0]<<endl;
+//
+//    cout<<"*********** check GENERATE RANDOM WITH BITS *************"<<endl;
+//
+//    int size = 31;
+//    vector<vector<FieldType>> bitsOfRand;
+//    vector<FieldType> rand(1);
+//    vector<FieldType> randOpened(1);
+//    geneateRandomWithBits(size, rand, bitsOfRand, 1);
+//
+//    vector<FieldType> bitsOfRandOpened(size);
+//    openShare(bitsOfRand[0], bitsOfRandOpened, T);
+//    cout<<"bits of random:"<<endl;
+//    for (int i=0; i<size; i++){
+//        cout<<bitsOfRandOpened[i];
+//    }
+//    cout<<endl;
+//
+//    openShare(rand, randOpened, T);
+//    cout<<"actual random = "<<randOpened[0]<<endl;
+//
+//    cout<<"*********** check LSB *************"<<endl;
+//
+//    vector<FieldType> lsb(1);
+//    vector<FieldType> lsbOpened(1);
+//    lsb[0] = LSB(rand[0], size);
+//
+//    openShare(lsb, lsbOpened, T);
+//    cout<<"lsb of random = "<<lsbOpened[0]<<endl;
 
-    vector<FieldType> openedElement(10);
-    openShare(element, openedElement, T);
-    cout<<"opened elements: "<<endl;
-    for (int i=0; i<10; i++) {
-        cout<<openedElement[i]<<" ";
-    }
-    cout<<endl;
 
-    inverse(element.data(), inverseArr);
-    cout<<"elements inverse: " << endl;
-    for (int i=0; i<10; i++) {
-        cout<<inverseArr[i]<<" ";
-    }
-    cout<<endl;
+//    cout<<"*********** check COMPARE *************"<<endl;
+//
+//    FieldType aC, bC, res;
+//    int numCompares = 100;
+//    long totalTime = 0;
+//    for (int i=0; i<numCompares; i++) {
+//        auto start = high_resolution_clock::now();
+//        aC = randomSharesArray[randomSharesOffset++];
+//        bC = randomSharesArray[randomSharesOffset++];
+//
+//        res = compare(aC, bC, 31);
+//        auto end = high_resolution_clock::now();
+//        auto duration = duration_cast<milliseconds>(end- start).count();
+//        cout << "compare took " << duration << " ms"<<endl;
+//        totalTime += duration;
+//    }
+//
+//
+//    vector<FieldType> temp(3);
+//    temp[0] = aC;
+//    temp[1] = bC;
+//    temp[2] = res;
+//    openShare(temp, temp, T);
+//    cout<<"a = "<<temp[0]<<endl;
+//    cout<<"b = "<<temp[1]<<endl;
+//    cout<<"a < b ? = "<<temp[2]<<endl;
+//
+//    cout << "compute " <<numCompares<<" compares took " << totalTime/numCompares << " ms in average"<<endl;
 
-    vector<FieldType> openedInverse(10);
-    openShare(inverseArr, openedInverse, T);
-    cout<<"opened elements inverse: "<<endl;
-    for (int i=0; i<10; i++) {
-        cout<<openedInverse[i]<<" ";
-    }
-    cout<<endl;
 
+}
 
-    for (int i=0; i<10; i++) {
-        auto res = openedElement[i] * openedInverse[i];
-
-        cout << "the output is " << res << endl;
-    }
-
-    cout<<"*********** check RANDOM BIT *************"<<endl;
-
-    vector<FieldType> bits(8);
-    checkRandomBit(bits);
-
-    cout<<"*********** check UNBOUNDED FAN-IN OR*************"<<endl;
-
-    checkUnboundedOR(bits.data(), 8);
-    checkUnboundedOR(bits.data(), 2);
-    checkUnboundedOR(bits.data(), 4);
-    checkUnboundedOR(bits.data(), 6);
-
-    cout<<"*********** check PREFIX OR*************"<<endl;
-
-    vector<FieldType> allBits(31);
-    vector<FieldType> allBitsPrefix(31);
-    vector<FieldType> allBitsPrefixOpened(31);
-    randomBit(allBits);
-
-    openShare(allBits, allBitsPrefixOpened, T);
-
-    cout<<"all bits:"<<endl;
-    for (int i=0; i<31; i++){
-        cout<<allBitsPrefixOpened[i]<<" ";
-    }
-    cout<<endl;
-
-    prefixOR(allBits.data(), allBitsPrefix);
-    openShare(allBitsPrefix, allBitsPrefixOpened, T);
-
-    cout<<"prefix bits:"<<endl;
-    for (int i=0; i<31; i++){
-        cout<<allBitsPrefixOpened[i]<<" ";
-    }
-    cout<<endl;
-
-    cout<<"*********** check BITWISE LESS THAN*************"<<endl;
-    vector<FieldType> a(31);
-    vector<FieldType> b(31);
-    vector<FieldType> aOpened(31);
-    vector<FieldType> bOpened(31);
-    randomBit(a);
-    randomBit(b);
-
-    openShare(a, aOpened, T);
-    cout<<"a:"<<endl;
-    for (int i=0; i<31; i++){
-        cout<<aOpened[i]<<" ";
-    }
-    cout<<endl;
-
-    openShare(b, bOpened, T);
-    cout<<"b:"<<endl;
-    for (int i=0; i<31; i++){
-        cout<<bOpened[i]<<" ";
-    }
-    cout<<endl;
-
-    vector<FieldType> resV(1);
-    resV[0] = bitwiseLessThan(a.data(), bOpened.data(), a.size());
-
-    vector<FieldType> resVOpened(1);
-    openShare(resV, resVOpened, T);
-
-    cout<<"a < b ? "<<resVOpened[0]<<endl;
-
-    cout<<"*********** check GENERATE RANDOM WITH BITS *************"<<endl;
-
-    int size = 31;
-    vector<FieldType> bitsOfRand;
-    vector<FieldType> rand(1);
-    vector<FieldType> randOpened(1);
-    geneateRandomWithBits(size, rand[0], bitsOfRand);
-
-    vector<FieldType> bitsOfRandOpened(size);
-    openShare(bitsOfRand, bitsOfRandOpened, T);
-    cout<<"bits of random:"<<endl;
-    for (int i=0; i<size; i++){
-        cout<<bitsOfRandOpened[i];
-    }
-    cout<<endl;
-
-    openShare(rand, randOpened, T);
-    cout<<"actual random = "<<randOpened[0]<<endl;
-
-    cout<<"*********** check LSB *************"<<endl;
-
-    vector<FieldType> lsb(1);
-    vector<FieldType> lsbOpened(1);
-    lsb[0] = LSB(rand[0], size);
-
-    openShare(lsb, lsbOpened, T);
-    cout<<"lsb of random = "<<lsbOpened[0]<<endl;
-
+template <class FieldType>
+void ProtocolParty<FieldType>::comparePhase(){
 
     cout<<"*********** check COMPARE *************"<<endl;
 
@@ -401,7 +447,7 @@ void ProtocolParty<FieldType>::runOnline() {
         res = compare(aC, bC, 31);
         auto end = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(end- start).count();
-        cout << "compare took " << duration << " ms"<<endl;
+//        cout << "compare took " << duration << " ms"<<endl;
         totalTime += duration;
     }
 
@@ -416,19 +462,6 @@ void ProtocolParty<FieldType>::runOnline() {
     cout<<"a < b ? = "<<temp[2]<<endl;
 
     cout << "compute " <<numCompares<<" compares took " << totalTime/numCompares << " ms in average"<<endl;
-
-//    auto t1 = high_resolution_clock::now();
-//    timer->startSubTask("inputPhase", iteration);
-//    inputPhase();
-//    timer->endSubTask("inputPhase", iteration);
-//    auto t2 = high_resolution_clock::now();
-//    auto duration = duration_cast<milliseconds>(t2-t1).count();
-//
-//    if(flag_print_timings) {
-//        cout << "time in milliseconds inputPhase: " << duration << endl;
-//    }
-
-
 
 }
 
@@ -872,24 +905,29 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
 }
 
 template <class FieldType>
-void ProtocolParty<FieldType>::geneateRandomWithBits(int size, FieldType & randomToFill, vector<FieldType> & bitsToFill) {
+void ProtocolParty<FieldType>::geneateRandomWithBits(int size, vector<FieldType> & randomToFill, vector<vector<FieldType>> & bitsToFill, int numRandoms) {
 
-    bitsToFill.resize(size);
-    randomBit(bitsToFill);
+    randomToFill.resize(numRandoms);
+    bitsToFill.resize(numRandoms);
 
-    randomToFill = *field->GetZero();
-    for (int i=0; i<size; i++){
-        randomToFill += bitsToFill[i] * twoSquares[twoSquares.size() - size + i];
+    for (int j=0; j<numRandoms; j++) {
+        bitsToFill[j].resize(size);
+        randomBit(bitsToFill[j]);
+
+        randomToFill[j] = *field->GetZero();
+        for (int i = 0; i < size; i++) {
+            randomToFill[j] += bitsToFill[j][i] * twoSquares[twoSquares.size() - size + i];
+        }
     }
 }
 
 template <class FieldType>
 FieldType ProtocolParty<FieldType>::LSB(FieldType & x, int bitsSize) {
 
-    vector<FieldType> rBits;
-    FieldType r;
+    vector<FieldType> rBits = bitsToLSB[randomWithBitsOffset];
+    FieldType r = randomsToLSB[randomWithBitsOffset++];
 
-    geneateRandomWithBits(bitsSize, r, rBits);
+//    geneateRandomWithBits(bitsSize, r, rBits);
 
 
 //    vector<FieldType> temp(bitsSize);
@@ -1133,7 +1171,8 @@ bool ProtocolParty<FieldType>::preparationPhase() {
     randomTAnd2TSharesOffset = 0;
     generateRandom2TAndTShares(numParties*100000,randomTAnd2TShares);
 
-
+    randomWithBitsOffset = 0;
+    geneateRandomWithBits(field->getElementSizeInBits(), randomsToLSB, bitsToLSB, 3*1000);
 //
 //    //first generate numOfTriples random shares
 //    generateRandomSharesWithCheck(1, bigR);
