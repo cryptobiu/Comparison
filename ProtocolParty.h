@@ -94,7 +94,9 @@ private:
 
     void geneateRandomWithBits(int size, FieldType & randomToFill, vector<FieldType> & bitsToFill);
     void getBits(FieldType x, vector<FieldType> & bits, int size);
-    FieldType LSB(FieldType* a, int bitsSize);
+    FieldType LSB(FieldType & a, int bitsSize);
+
+    FieldType compare(FieldType & a, FieldType & b, int bitSize);
 
 public:
     ProtocolParty(int argc, char* argv[]);
@@ -380,12 +382,40 @@ void ProtocolParty<FieldType>::runOnline() {
 
     vector<FieldType> lsb(1);
     vector<FieldType> lsbOpened(1);
-    lsb[0] = LSB(&rand[0], size);
+    lsb[0] = LSB(rand[0], size);
 
     openShare(lsb, lsbOpened, T);
     cout<<"lsb of random = "<<lsbOpened[0]<<endl;
 
 
+    cout<<"*********** check COMPARE *************"<<endl;
+
+    FieldType aC, bC, res;
+    int numCompares = 100;
+    long totalTime = 0;
+    for (int i=0; i<numCompares; i++) {
+        auto start = high_resolution_clock::now();
+        aC = randomSharesArray[randomSharesOffset++];
+        bC = randomSharesArray[randomSharesOffset++];
+
+        res = compare(aC, bC, 31);
+        auto end = high_resolution_clock::now();
+        auto duration = duration_cast<milliseconds>(end- start).count();
+        cout << "compare took " << duration << " ms"<<endl;
+        totalTime += duration;
+    }
+
+
+    vector<FieldType> temp(3);
+    temp[0] = aC;
+    temp[1] = bC;
+    temp[2] = res;
+    openShare(temp, temp, T);
+    cout<<"a = "<<temp[0]<<endl;
+    cout<<"b = "<<temp[1]<<endl;
+    cout<<"a < b ? = "<<temp[2]<<endl;
+
+    cout << "compute " <<numCompares<<" compares took " << totalTime/numCompares << " ms in average"<<endl;
 
 //    auto t1 = high_resolution_clock::now();
 //    timer->startSubTask("inputPhase", iteration);
@@ -627,8 +657,7 @@ FieldType ProtocolParty<FieldType>::unboundedOR(FieldType* shares, int l) {
     }
     A[l-1] = cMult * cOpened[l-1] * lastB;
 
-    openShare(A, cOpened, T);
-
+//    openShare(A, cOpened, T);
 //    cout<<"opened A:"<<endl;
 //    for (int i=0; i<l; i++){
 //        cout<<cOpened[i]<<" ";
@@ -643,7 +672,7 @@ FieldType ProtocolParty<FieldType>::unboundedOR(FieldType* shares, int l) {
 template <class FieldType>
 void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & bToFill) {
     int size = bToFill.size();
-    cout<<"original size = "<<size<<endl;
+//    cout<<"original size = "<<size<<endl;
 
 
     //calculate xi = unbounded or of each delta bits
@@ -652,16 +681,22 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
     vector<FieldType> f(lambda);
     vector<FieldType> s(lambda);
 
-    vector<FieldType> sharesAlligned;
-    if (size % delta ==0){
-        sharesAlligned.resize(size);
-        memcpy((byte*)sharesAlligned.data(), (byte*)shares, size*field->getElementSizeInBytes());
+    FieldType* sharesAlligned;
+    int newSize;
+    int remain = size % delta;
+    if (remain == 0){
+//        sharesAlligned.resize(size);
+        newSize = size;
+        sharesAlligned = shares;
+//        memcpy((byte*)sharesAlligned.data(), (byte*)shares, size*field->getElementSizeInBytes());
     } else {
-        sharesAlligned.resize((size/delta + 1)*delta);
-        cout<<"sharesAlligned size = "<<sharesAlligned.size()<<endl;
+        newSize = (size/delta + 1)*delta;
+        sharesAlligned = new FieldType[newSize];
+//        sharesAlligned.resize((size/delta + 1)*delta);
+//        cout<<"sharesAlligned size = "<<newSize<<endl;
 
-        memcpy((byte*)sharesAlligned.data(), (byte*)shares, size*field->getElementSizeInBytes());
-        memset((byte*)sharesAlligned.data(), 0, (sharesAlligned.size() - size)*field->getElementSizeInBytes());
+        memcpy((byte*)sharesAlligned, (byte*)shares, size*field->getElementSizeInBytes());
+        memset((byte*)sharesAlligned + size*field->getElementSizeInBytes(), 0, (newSize - size)*field->getElementSizeInBytes());
     }
 
 //    vector<FieldType> temp(sharesAlligned.size());
@@ -673,7 +708,7 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 //    cout<<endl;
 
     for (int i=0; i<lambda; i++){
-        x[i] = unboundedOR(sharesAlligned.data() + i*delta, delta);
+        x[i] = unboundedOR(sharesAlligned + i*delta, delta);
     }
 
     //calculate yi = prefix or of x
@@ -720,7 +755,6 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
     }
 
     vector<FieldType> fToMultiply(delta);
-    vector<FieldType> bAlligned(sharesAlligned.size());
     //calculate the real b values:
     for (int i=0; i<lambda; i++){
         for (int j=0; j<delta; j++){
@@ -734,12 +768,16 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 //            cout<<fToMultiply[i]<<" ";
 //        }
 //        cout<<endl;
-        for (int j=0; j<delta; j++){
-            bAlligned[i*delta + j] = fToMultiply[j] + s[i];
+        if (i<lambda-1) {
+            for (int j = 0; j < delta; j++) {
+                bToFill[i * delta + j] = fToMultiply[j] + s[i];
+            }
+        } else { //last group
+            for (int j = 0; j < remain; j++) {
+                bToFill[i * delta + j] = fToMultiply[j] + s[i];
+            }
         }
     }
-
-    memcpy((byte*)bToFill.data(), (byte*)bAlligned.data(), size*field->getElementSizeInBytes());
 
 //    openShare(x,x,T);
 //    cout<<"x:"<<endl;
@@ -791,8 +829,8 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
         c[i] = c[i] - (two * a[i] * b[i]);
     }
 
-    vector<FieldType> temp(size);
-    openShare(c,temp,T);
+//    vector<FieldType> temp(size);
+//    openShare(c,temp,T);
 //    cout<<"c:"<<endl;
 //    for (int i=0; i<size; i++){
 //        cout<<temp[i]<<" ";
@@ -802,7 +840,7 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
     //compute d[i] = prefix OR of ci
     vector<FieldType> d(size);
     prefixOR(c.data(), d);
-    openShare(d,temp,T);
+//    openShare(d,temp,T);
 //    cout<<"d:"<<endl;
 //    for (int i=0; i<size; i++){
 //        cout<<temp[i]<<" ";
@@ -815,7 +853,7 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
     for (int i=1; i<size; i++){
         e[i] = d[i] - d[i-1];
     }
-    openShare(e,temp,T);
+//    openShare(e,temp,T);
 //    cout<<"e:"<<endl;
 //    for (int i=0; i<size; i++){
 //        cout<<temp[i]<<" ";
@@ -823,9 +861,11 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
 //    cout<<endl;
 
     FieldType res(0);
-//    DNHonestMultiplication(e.data(), b, mults, size);
+    vector<FieldType> mults(size);
+    DNHonestMultiplication(e.data(), b, mults, size);
     for (int i=0; i<size; i++){
-        res += e[i] * b[i];
+//        res += e[i] * b[i];
+        res += mults[i];
     }
 
     return res;
@@ -844,43 +884,116 @@ void ProtocolParty<FieldType>::geneateRandomWithBits(int size, FieldType & rando
 }
 
 template <class FieldType>
-FieldType ProtocolParty<FieldType>::LSB(FieldType* x, int bitsSize) {
+FieldType ProtocolParty<FieldType>::LSB(FieldType & x, int bitsSize) {
 
     vector<FieldType> rBits;
     FieldType r;
 
     geneateRandomWithBits(bitsSize, r, rBits);
-    vector<FieldType> temp(1);
-    temp[0] = r;
-    openShare(temp, temp, T);
-    cout<<"r:"<<temp[0]<<endl;
+
+
+//    vector<FieldType> temp(bitsSize);
+//    openShare(rBits, temp, T);
+//    cout<<"bits of random:"<<endl;
+//    for (int i=0; i<bitsSize; i++){
+//        cout<<temp[i];
+//    }
+//    cout<<endl;
+//    temp[0] = r;
+//    openShare(temp, temp, T);
+//    cout<<"r:"<<temp[0]<<endl;
 
 
     vector<FieldType> c(1);
     vector<FieldType> cOpened(1);
-    c[0] = *x + r;
-
+    c[0] = x + r;
     openShare(c, cOpened, T);
-    cout<<"c:"<<endl;
-    for (int i=0; i<bitsSize; i++){
-        cout<<cOpened[i]<<" ";
-    }
-    cout<<endl;
+//    cout<<"c:"<<cOpened[0]<<endl;
 
     vector<FieldType> cBits(bitsSize);
     getBits(cOpened[0], cBits, bitsSize);
 
-    FieldType two(2);
-    FieldType compare = bitwiseLessThan(rBits.data(), cBits.data(), bitsSize);
-    FieldType xorBits0 = c[bitsSize - 1] + rBits[bitsSize - 1] - two*c[bitsSize - 1]*rBits[bitsSize - 1];
 
-    FieldType res = (compare * (*field->GetOne()-xorBits0)) + ((*field->GetOne() - compare) * xorBits0);
+//    openShare(cBits, temp, T);
+//    cout<<"c bits:"<<endl;
+//    for (int i=0; i<bitsSize; i++){
+//        cout<<temp[i];
+//    }
+//    cout<<endl;
+
+    FieldType two(2);
+    FieldType compare = bitwiseLessThan(cBits.data(), rBits.data(), bitsSize);
+
+//    temp[0] = compare;
+//    openShare(temp, temp, T);
+//     cout<<"c<r? "<<temp[0]<<endl;
+    FieldType xorBits0 = cBits[bitsSize - 1] + rBits[bitsSize - 1] - two*cBits[bitsSize - 1]*rBits[bitsSize - 1];
+//    temp[0] = xorBits0;
+//    openShare(temp, temp, T);
+//    cout<<"c0 ^ r0 = "<<temp[0]<<endl;
+    vector<FieldType> left(2);
+    vector<FieldType> right(2);
+    vector<FieldType> mults(2);
+    left[0] = compare;
+    right[0] = *field->GetOne()-xorBits0;
+    left[1] = *field->GetOne() - compare;
+    right[1] = xorBits0;
+
+
+    mults[0] = compare * (*field->GetOne()-xorBits0);
+    mults[1] = (*field->GetOne() - compare) * xorBits0;
+    DNHonestMultiplication(left.data(), right.data(), mults, 2);
+    FieldType res = mults[0] + mults[1];
+//    temp[0] = res;
+//    openShare(temp, temp, T);
+//    cout<<"res = "<<temp[0]<<endl;
     return res;
 
 }
+
+template <class FieldType>
+FieldType ProtocolParty<FieldType>::compare(FieldType & a, FieldType & b, int bitSize){
+
+
+    FieldType two(2);
+    //w = [a<p/2]
+    vector<FieldType> w(1);
+    w[0] = a*two;
+    w[0] = *field->GetOne() - LSB(w[0], bitSize);
+
+    //x = [b<p/2]
+    vector<FieldType> x(1);
+    x[0] = b*two;
+    x[0] = *field->GetOne() - LSB(x[0], bitSize);
+
+    //y = [(a-b)<p/2]
+    vector<FieldType> y(1);
+    y[0] = (a-b)*two;
+    y[0] = *field->GetOne() - LSB(y[0], bitSize);
+
+    //compute result = w(x+y-2xy) + 1-y-x+xy
+
+    //xy
+    vector<FieldType> xy(1);
+    DNHonestMultiplication(x.data(), y.data(), xy, 1);
+
+    //x+y-2xy
+    vector<FieldType> calc(1);
+    calc[0] = x[0] + y[0] - two*xy[0];
+
+    //w(x+y-2xy)
+    DNHonestMultiplication(w.data(), calc.data(), calc, 1);
+
+    //result = w(x+y-2xy) + 1-y-x+xy
+    FieldType res = calc[0] + *field->GetOne() - y[0] - x[0] + xy[0];
+
+    return res;
+
+}
+
 template <class FieldType>
 void ProtocolParty<FieldType>::getBits(FieldType x, vector<FieldType> & bits, int size) {
-    for (int i=size; i>=0; i--) {
+    for (int i=size-1; i>=0; i--) {
         bits[i] = x.elem & 1;
         x.elem =  x.elem >> 1;
     }
@@ -1008,7 +1121,7 @@ bool ProtocolParty<FieldType>::preparationPhase() {
 
     int keysize = 16/field->getElementSizeInBytes() + 1;
 
-    int numOfRandomShares = 10000*keysize + 1;
+    int numOfRandomShares = 100000*keysize + 1;
     randomSharesArray.resize(numOfRandomShares);
 
     //generate enough random shares for the AES key
@@ -1018,7 +1131,7 @@ bool ProtocolParty<FieldType>::preparationPhase() {
     //run offline for all the future multiplications including the multiplication of the protocol
 
     randomTAnd2TSharesOffset = 0;
-    generateRandom2TAndTShares(numParties*10000,randomTAnd2TShares);
+    generateRandom2TAndTShares(numParties*100000,randomTAnd2TShares);
 
 
 //
