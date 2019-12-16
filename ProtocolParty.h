@@ -45,13 +45,15 @@ private:
 
     vector<vector<FieldType>> polynomials;
     vector<FieldType> randomTAnd2TShares;
-    int randomTAnd2TSharesOffset = 0;
+    int randomTAnd2TSharesOffset;
     vector<FieldType> randomSharesArray;
-    int randomSharesOffset = 0;
+    int randomSharesOffset;
 
     vector<FieldType> randomsToLSB;
     vector<vector<FieldType>> bitsToLSB;
     int randomWithBitsOffset;
+
+    int numCompares;
 
 
     void initializationPhase();
@@ -83,7 +85,7 @@ private:
     FieldType interpolate(vector<FieldType>& x);
     FieldType reconstructShare(vector<FieldType>& x, int d);
 
-    void DNHonestMultiplication(FieldType *a, FieldType *b, vector<FieldType> &cToFill, int numOfTupples);
+    void DNHonestMultiplication(FieldType *a, FieldType *b, vector<FieldType> &cToFill, int numOfTupples, bool sop = false);
     void inverse(FieldType *a, vector<FieldType> &bToFill);
 
     void randomBit(vector<FieldType> &bToFill);
@@ -198,6 +200,19 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
         cout << "time in milliseconds initializationPhase: " << duration << endl;
     }
 
+    string tmp = "init times";
+    //cout<<"before sending any data"<<endl;
+    byte tmpBytes[20];
+    for (int i=0; i<parties.size(); i++){
+        if (parties[i]->getID() < partyId){
+            parties[i]->getChannel()->write(tmp);
+            parties[i]->getChannel()->read(tmpBytes, tmp.size());
+        } else {
+            parties[i]->getChannel()->read(tmpBytes, tmp.size());
+            parties[i]->getChannel()->write(tmp);
+        }
+    }
+
 }
 
 
@@ -258,7 +273,7 @@ void ProtocolParty<FieldType>::runOnline() {
     auto duration = duration_cast<milliseconds>(t2-t1).count();
 
     if(flag_print_timings) {
-        cout << "time in milliseconds inputPhase: " << duration << endl;
+        cout << "time in milliseconds comparePhase: " << duration << endl;
     }
 
 //    cout<<"*********** check inverse *************"<<endl;
@@ -437,7 +452,6 @@ void ProtocolParty<FieldType>::comparePhase(){
     cout<<"*********** check COMPARE *************"<<endl;
 
     FieldType aC, bC, res;
-    int numCompares = 100;
     long totalTime = 0;
     for (int i=0; i<numCompares; i++) {
         auto start = high_resolution_clock::now();
@@ -670,11 +684,14 @@ FieldType ProtocolParty<FieldType>::unboundedOR(FieldType* shares, int l) {
     c[0] = A[0]; //the first value should be fixed
 
     //calc second column - A * all B values
-    DNHonestMultiplication(c.data(), randomsInverse.data(), c, l);
+//    DNHonestMultiplication(c.data(), randomsInverse.data(), c, l);
+    for (int i=0; i<l; i++){
+        c[i] = c[i]*randomsInverse[i];
+    }
 
     //open C
     vector<FieldType> cOpened(l);
-    openShare(c, cOpened, T);
+    openShare(c, cOpened, 2*T);
 
 //    cout<<"opened c:"<<endl;
 //    for (int i=0; i<l; i++){
@@ -763,15 +780,16 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 
     //TODO can be optimized!!
     for (int j=0; j<delta; j++){
-        for (int i=0; i<lambda; i++) {
-            aToMultiply[i] = sharesAlligned[i * delta + j];
-        }
+//        for (int i=0; i<lambda; i++) {
+//            aToMultiply[i] = sharesAlligned[i * delta + j];
+//        }
 
-        DNHonestMultiplication(f.data(), aToMultiply.data(), aToMultiply, lambda);
         for (int i=0; i<lambda; i++) {
-            a[j] += aToMultiply[i];
+            a[j] += f[i]*sharesAlligned[i * delta + j];
+
         }
     }
+    DNHonestMultiplication(a.data(), a.data(), a, delta, true);
 
     //calculate the real b values for the group which contains the first "1" bit.
     //Note that the group index is unknown
@@ -787,27 +805,33 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 
     }
 
-    vector<FieldType> fToMultiply(delta);
+    vector<FieldType> fToMultiply(delta*lambda);
+    vector<FieldType> bToMultiply(delta*lambda);
     //calculate the real b values:
-    for (int i=0; i<lambda; i++){
-        for (int j=0; j<delta; j++){
-            fToMultiply[j] = f[i];
+    for (int i=0; i<lambda; i++) {
+        for (int j = 0; j < delta; j++) {
+            fToMultiply[i*delta + j] = f[i];
+            bToMultiply[i*delta + j] = b[j];
         }
+    }
 
-        DNHonestMultiplication(fToMultiply.data(), b.data(), fToMultiply, delta);
+    DNHonestMultiplication(fToMultiply.data(), bToMultiply.data(), fToMultiply, delta*lambda);
 
 //        cout<<"fToMultiply:"<<endl;
 //        for (int i=0; i<delta; i++){
 //            cout<<fToMultiply[i]<<" ";
 //        }
 //        cout<<endl;
+
+    for (int i=0; i<lambda; i++) {
         if (i<lambda-1) {
             for (int j = 0; j < delta; j++) {
-                bToFill[i * delta + j] = fToMultiply[j] + s[i];
+
+                bToFill[i * delta + j] = fToMultiply[i * delta + j] + s[i];
             }
         } else { //last group
             for (int j = 0; j < remain; j++) {
-                bToFill[i * delta + j] = fToMultiply[j] + s[i];
+                bToFill[i * delta + j] = fToMultiply[i * delta + j] + s[i];
             }
         }
     }
@@ -893,15 +917,16 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
 //    }
 //    cout<<endl;
 
-    FieldType res(0);
-    vector<FieldType> mults(size);
-    DNHonestMultiplication(e.data(), b, mults, size);
+    vector<FieldType> res(1, *field->GetZero());
     for (int i=0; i<size; i++){
-//        res += e[i] * b[i];
-        res += mults[i];
+        res[0] += e[i] * b[i];
+//        res += mults[i];
     }
 
-    return res;
+//    vector<FieldType> mults(size);
+    DNHonestMultiplication(res.data(), res.data(), res, 1, true);
+
+    return res[0];
 }
 
 template <class FieldType>
@@ -1151,15 +1176,16 @@ void ProtocolParty<FieldType>::initializationPhase() {
         twoSquares[i] = twoSquares[i+1]*2;
     }
 
+    numCompares = 100;
+
 }
 
 
 template <class FieldType>
 bool ProtocolParty<FieldType>::preparationPhase() {
 
-    int keysize = 16/field->getElementSizeInBytes() + 1;
-
-    int numOfRandomShares = 100000*keysize + 1;
+    int numOfRandomShares = 2*times*numCompares*3*(2*(lambda*delta + (delta*(delta-1))/2 - 1 + (lambda*(lambda-1))/2 - 1) + 31);
+    randomSharesOffset = 0;
     randomSharesArray.resize(numOfRandomShares);
 
     //generate enough random shares for the AES key
@@ -1168,11 +1194,12 @@ bool ProtocolParty<FieldType>::preparationPhase() {
 
     //run offline for all the future multiplications including the multiplication of the protocol
 
+    int numOfRandomSharesForMults = 2*times*numCompares*3*(lambda*delta + (delta*(delta-1))/2 - 1 + (lambda*(lambda-1))/2 - 1 + 2 + 1 + 1 + lambda*delta);
     randomTAnd2TSharesOffset = 0;
-    generateRandom2TAndTShares(numParties*100000,randomTAnd2TShares);
+    generateRandom2TAndTShares(numOfRandomShares,randomTAnd2TShares);
 
     randomWithBitsOffset = 0;
-    geneateRandomWithBits(field->getElementSizeInBits(), randomsToLSB, bitsToLSB, 3*1000);
+    geneateRandomWithBits(field->getElementSizeInBits(), randomsToLSB, bitsToLSB, 3*numCompares);
 //
 //    //first generate numOfTriples random shares
 //    generateRandomSharesWithCheck(1, bigR);
@@ -1463,7 +1490,7 @@ void ProtocolParty<FieldType>::calcRecBufElements(vector<vector<FieldType>> & re
 
 
 template <class FieldType>
-void ProtocolParty<FieldType>::DNHonestMultiplication(FieldType *a, FieldType *b, vector<FieldType> &cToFill, int numOfTupples) {
+void ProtocolParty<FieldType>::DNHonestMultiplication(FieldType *a, FieldType *b, vector<FieldType> &cToFill, int numOfTupples, bool sop) {
 
     int fieldByteSize = field->getElementSizeInBytes();
     vector<FieldType> xyMinusRShares(numOfTupples);//hold both in the same vector to send in one batch
@@ -1475,13 +1502,22 @@ void ProtocolParty<FieldType>::DNHonestMultiplication(FieldType *a, FieldType *b
     vector<vector<FieldType>> recBufsElements(N);
     vector<vector<FieldType>> sendBufsElements(N);
 
+    if (!sop) {
+        //generate the shares for x+a and y+b. do it in the same array to send once
+        for (int k = 0; k < numOfTupples; k++)//go over only the logit gates
+        {
+            //compute the share of xy-r
+            xyMinusRShares[k] = a[k] * b[k] - randomTAnd2TShares[randomTAnd2TSharesOffset + 2 * k + 1];
 
-    //generate the shares for x+a and y+b. do it in the same array to send once
-    for (int k = 0; k < numOfTupples; k++)//go over only the logit gates
-    {
-        //compute the share of xy-r
-        xyMinusRShares[k] = a[k]*b[k] - randomTAnd2TShares[randomTAnd2TSharesOffset + 2*k+1];
+        }
+    } else { //a is sum of products. No need to multiply
+        //generate the shares for x+a and y+b. do it in the same array to send once
+        for (int k = 0; k < numOfTupples; k++)//go over only the logit gates
+        {
+            //compute the share of xy-r
+            xyMinusRShares[k] = a[k] - randomTAnd2TShares[randomTAnd2TSharesOffset + 2 * k + 1];
 
+        }
     }
 
     //set the acctual number of mult gate proccessed in this layer
