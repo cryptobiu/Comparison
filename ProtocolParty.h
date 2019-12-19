@@ -59,7 +59,7 @@ private:
     void initializationPhase();
     bool preparationPhase();
     void interpolatePolynomial(vector<FieldType>& coeff, const FieldType* a, FieldType* b, int size);
-    FieldType evalPolynomial(const vector<FieldType>& coeff, vector<FieldType> & a);
+    FieldType evalPolynomial(const vector<FieldType>& coeff, FieldType* a);
 
     bool RandomSharingForInputs(int no_random, vector<FieldType> & sharingBufInputsTElements);
     void generateRandom2TAndTShares(int numOfRandomPairs, vector<FieldType>& randomElementsToFill);
@@ -91,7 +91,7 @@ private:
     void randomBit(vector<FieldType> &bToFill);
     void checkRandomBit(vector<FieldType> &bits);
 
-    FieldType unboundedOR(FieldType* shares, int l);
+    void unboundedOR(vector<vector<FieldType>> & shares, int sizeTotal, vector<FieldType> & resToFill, int offset);
     void checkUnboundedOR(FieldType* bits, int numBits);
 
     void prefixOR(FieldType* shares, vector<FieldType> & bToFill);
@@ -174,8 +174,10 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
     N = numParties;
     T = (numParties+1)/2 - 1;
 
-    delta = 8;
-    lambda = (field->getElementSizeInBits()+7)/8;
+//    delta = 4;
+//    lambda = (field->getElementSizeInBits()+3)/4;
+    delta = 5;
+    lambda = 3;
 
     MPCCommunication comm;
     string partiesFile = this->getParser().getValueByKey(arguments, "partiesFile");
@@ -455,19 +457,18 @@ void ProtocolParty<FieldType>::comparePhase(){
     cout<<"*********** check COMPARE *************"<<endl;
 
     FieldType aC, bC, res;
-    long totalTime = 0;
+    auto start = high_resolution_clock::now();
     for (int i=0; i<numCompares; i++) {
-        auto start = high_resolution_clock::now();
+
         aC = randomSharesArray[randomSharesOffset++];
         bC = randomSharesArray[randomSharesOffset++];
 
         res = compare(aC, bC, field->getElementSizeInBits());
-        auto end = high_resolution_clock::now();
-        auto duration = duration_cast<milliseconds>(end- start).count();
-//        cout << "compare took " << duration << " ms"<<endl;
-        totalTime += duration;
-    }
 
+    }
+    auto end = high_resolution_clock::now();
+    auto duration = duration_cast<milliseconds>(end- start).count();
+//        cout << "compare took " << duration << " ms"<<endl;
 
     vector<FieldType> temp(3);
     temp[0] = aC;
@@ -478,7 +479,7 @@ void ProtocolParty<FieldType>::comparePhase(){
     cout<<"b = "<<temp[1]<<endl;
     cout<<"a < b ? = "<<temp[2]<<endl;
 
-    cout << "compute " <<numCompares<<" compares took " << totalTime/numCompares << " ms in average"<<endl;
+    cout << "compute " <<numCompares<<" compares took " << duration/numCompares << " ms in average"<<endl;
 
 }
 
@@ -658,57 +659,88 @@ void ProtocolParty<FieldType>::randomBit(vector<FieldType> &bToFill) {
 
 
 template <class FieldType>
-FieldType ProtocolParty<FieldType>::unboundedOR(FieldType* shares, int l) {
-    vector<FieldType> A(l);
-    vector<FieldType> b(l);
+void ProtocolParty<FieldType>::unboundedOR(vector<vector<FieldType>> & shares, int sizeTotal, vector<FieldType> & resToFill, int offset) {
+    int numOfGroups = shares.size();
+//    cout<<"num of groups in unbounded = "<<numOfGroups<<endl;
+    vector<FieldType> A(sizeTotal);
+    vector<FieldType> b(sizeTotal);
 
-    A[0] = *field->GetOne();
-    for (int i=0; i<l; i++){
-        A[0] += shares[i];
+    vector<int> sizes(numOfGroups);
+    vector<int> offsets(numOfGroups);
+    int index = 0;
+    for (int j=0; j<numOfGroups; j++) {
+        sizes[j] = shares[j].size();
+        offsets[j] = index;
+
+        A[offsets[j]] = *field->GetOne();
+        for (int i = 0; i < sizes[j]; i++) {
+            A[offsets[j]] += shares[j][i];
+        }
+        index += sizes[j];
     }
 
-    b[0] = *field->GetOne();
-    for (int i=1; i<l; i++){
-        A[i] = A[0];
-        b[i] = randomSharesArray[randomSharesOffset + i-1];
-    }
+//    cout<<"sizes:"<<endl;
+//    for (int j=0; j<numOfGroups; j++) {
+//        cout<<sizes[j]<<" ";
+//    }
+//    cout<<endl;
+//    cout<<"offsets:"<<endl;
+//    for (int j=0; j<numOfGroups; j++) {
+//        cout<<offsets[j]<<" ";
+//    }
+//    cout<<endl;
 
-    FieldType lastB = randomSharesArray[randomSharesOffset + l-1];
     int originalOffset = randomSharesOffset;
-    randomSharesOffset += l;
+    vector<FieldType> lastB(numOfGroups);
+    for (int j=0; j<numOfGroups; j++) {
+        b[offsets[j]] = *field->GetOne();
+        for (int i = 1; i < sizes[j]; i++) {
+            A[offsets[j] + i] = A[offsets[j]];
+            b[offsets[j] + i] = randomSharesArray[randomSharesOffset++];
+        }
+        lastB[j] = randomSharesArray[randomSharesOffset++];
+    }
 
     //interpolate done in initialization phase
-    vector<FieldType> randomsInverse(l);
+    vector<FieldType> randomsInverse(sizeTotal);
     inverse(randomSharesArray.data() + originalOffset, randomsInverse);
-
-    vector<FieldType> c(l);
+//cout<<"after inverse"<<endl;
+    vector<FieldType> c(sizeTotal);
     //calc first column - A * all B values
-    DNHonestMultiplication(A.data(), b.data(), c, l);
-    c[0] = A[0]; //the first value should be fixed
+    DNHonestMultiplication(A.data(), b.data(), c, sizeTotal);
+
+    for (int j=0; j<numOfGroups; j++) {
+        c[offsets[j]] = A[offsets[j]]; //the first value should be fixed
+    }
 
     //calc second column - A * all B values
 //    DNHonestMultiplication(c.data(), randomsInverse.data(), c, l);
-    for (int i=0; i<l; i++){
-        c[i] = c[i]*randomsInverse[i];
+    for (int j=0; j<numOfGroups; j++) {
+        for (int i = 0; i < sizes[j]; i++) {
+            c[offsets[j] + i] = c[offsets[j] + i] * randomsInverse[offsets[j] + i];
+        }
     }
 
     //open C
-    vector<FieldType> cOpened(l);
+    vector<FieldType> cOpened(sizeTotal);
     openShare(c, cOpened, 2*T);
 
 //    cout<<"opened c:"<<endl;
-//    for (int i=0; i<l; i++){
+//    for (int i=0; i<sizeTotal; i++){
 //        cout<<cOpened[i]<<" ";
 //    }
 //    cout<<endl;
 
-    FieldType cMult = cOpened[0];
+    FieldType cMult;
     //compute all A squares
-    for (int i=1; i<l-1; i++){
-        cMult *= cOpened[i];
-        A[i] = cMult * b[i+1];
+    for (int j=0; j<numOfGroups; j++) {
+        cMult = cOpened[offsets[j]];
+        for (int i = 1; i < sizes[j] - 1; i++) {
+            cMult *= cOpened[offsets[j] + i];
+            A[offsets[j] + i] = cMult * b[offsets[j] + i + 1];
+        }
+        A[offsets[j] + sizes[j] - 1] = cMult * cOpened[offsets[j] + sizes[j] - 1] * lastB[j];
     }
-    A[l-1] = cMult * cOpened[l-1] * lastB;
 
 //    openShare(A, cOpened, T);
 //    cout<<"opened A:"<<endl;
@@ -717,9 +749,9 @@ FieldType ProtocolParty<FieldType>::unboundedOR(FieldType* shares, int l) {
 //    }
 //    cout<<endl;
 
-
-
-    return evalPolynomial(polynomials[l-2], A);
+    for (int j=0; j<numOfGroups; j++) {
+        resToFill[offset + j] = evalPolynomial(polynomials[sizes[j]-2], A.data() + offsets[j]);
+    }
 }
 
 template <class FieldType>
@@ -727,48 +759,78 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
     int size = bToFill.size();
 //    cout<<"original size = "<<size<<endl;
 
-
     //calculate xi = unbounded or of each delta bits
     vector<FieldType> x(lambda);
     vector<FieldType> y(lambda);
     vector<FieldType> f(lambda);
     vector<FieldType> s(lambda);
 
-    FieldType* sharesAlligned;
-    int newSize;
+    vector<vector<FieldType>> sharesVector(lambda);
+
+    int totalSize;
+    //copy the first lambda-1 groups
+    for (int i=0; i<lambda-1; i++){
+        sharesVector[i].resize(delta);
+        memcpy((byte*)sharesVector[i].data(), (byte*)&shares[i*delta], delta*field->getElementSizeInBytes());
+    }
+    //copy the last gropu. Notice that it can contain less than delta elements
     int remain = size % delta;
     if (remain == 0){
-//        sharesAlligned.resize(size);
-        newSize = size;
-        sharesAlligned = shares;
-//        memcpy((byte*)sharesAlligned.data(), (byte*)shares, size*field->getElementSizeInBytes());
-    } else {
-        newSize = (size/delta + 1)*delta;
-        sharesAlligned = new FieldType[newSize];
-//        sharesAlligned.resize((size/delta + 1)*delta);
-//        cout<<"sharesAlligned size = "<<newSize<<endl;
+        sharesVector[lambda-1].resize(delta);
+        memcpy((byte*)sharesVector[lambda-1].data(), (byte*)&shares[(lambda-1)*delta], delta*field->getElementSizeInBytes());
+        totalSize = lambda*delta;
 
-        memcpy((byte*)sharesAlligned, (byte*)shares, size*field->getElementSizeInBytes());
-        memset((byte*)sharesAlligned + size*field->getElementSizeInBytes(), 0, (newSize - size)*field->getElementSizeInBytes());
+    } else {
+        sharesVector[lambda-1].resize(remain);
+        memcpy((byte*)sharesVector[lambda-1].data(), (byte*)&shares[(lambda-1)*delta], remain*field->getElementSizeInBytes());
+        totalSize = (lambda-1)*delta + remain;
     }
 
-//    vector<FieldType> temp(sharesAlligned.size());
-//    openShare(sharesAlligned,temp,T);
+    vector<FieldType> temp;
 //    cout<<"sharesAlligned:"<<endl;
-//    for (int i=0; i<sharesAlligned.size(); i++){
+//    for (int i=0; i<lambda; i++){
+//        temp.resize(sharesVector[i].size());
+//        openShare(sharesVector[i],temp,T);
+//        for (int i=0; i<temp.size(); i++){
+//            cout<<temp[i]<<" ";
+//        }
+//    }
+//    cout<<endl;
+//cout<<"before unbounded"<<endl;
+//    cout<<"totalSize = "<<totalSize<<endl;
+    unboundedOR(sharesVector, totalSize, x, 0);
+//    for (int i=0; i<lambda; i++){
+//        x[i] = unboundedOR(sharesAlligned + i*delta, delta);
+//    }
+
+//    temp.resize(x.size());
+//    openShare(x,temp,T);
+//    cout<<"x:"<<endl;
+//    for (int i=0; i<temp.size(); i++){
 //        cout<<temp[i]<<" ";
 //    }
 //    cout<<endl;
 
-    for (int i=0; i<lambda; i++){
-        x[i] = unboundedOR(sharesAlligned + i*delta, delta);
-    }
-
     //calculate yi = prefix or of x
-    y[0] = x[0];
-    for (int i=1; i<lambda; i++){
-        y[i] = unboundedOR(x.data(), i+1);
+    totalSize = 0;
+    sharesVector.resize(lambda-1);
+    for (int i=0; i<lambda-1; i++){
+        sharesVector[i].resize(i+2);
+        memcpy((byte*)sharesVector[i].data(), (byte*)x.data(), (i+2)*field->getElementSizeInBytes());
+        totalSize += i+2;
     }
+    y[0] = x[0];
+    unboundedOR(sharesVector, totalSize, y, 1);
+//    for (int i=1; i<lambda; i++){
+//        y[i] = unboundedOR(x.data(), i+1);
+//    }
+
+//    openShare(y,temp,T);
+//    cout<<"y:"<<endl;
+//    for (int i=0; i<temp.size(); i++){
+//        cout<<temp[i]<<" ";
+//    }
+//    cout<<endl;
 
     //calculate fi = find the group with the first "1" bit
     f[0] = y[0];
@@ -787,20 +849,35 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 //            aToMultiply[i] = sharesAlligned[i * delta + j];
 //        }
 
-        for (int i=0; i<lambda; i++) {
-            a[j] += f[i]*sharesAlligned[i * delta + j];
+        for (int i=0; i<lambda-1; i++) {
+            a[j] += f[i]*shares[i * delta + j];
 
         }
+
+        if (j<remain){
+            a[j] += f[lambda-1]*shares[(lambda-1) * delta + j];
+        }
     }
+
     DNHonestMultiplication(a.data(), a.data(), a, delta, true);
 
     //calculate the real b values for the group which contains the first "1" bit.
     //Note that the group index is unknown
     vector<FieldType> b(delta);
-    b[0] = a[0];
-    for (int i=1; i<delta; i++){
-        b[i] = unboundedOR(a.data(), i+1);
+
+    totalSize = 0;
+    sharesVector.resize(delta-1);
+    for (int i=0; i<delta-1; i++){
+        sharesVector[i].resize(i+2);
+        memcpy((byte*)sharesVector[i].data(), (byte*)a.data(), (i+2)*field->getElementSizeInBytes());
+        totalSize += i+2;
     }
+    b[0] = a[0];
+    unboundedOR(sharesVector, totalSize, b, 1);
+//    b[0] = a[0];
+//    for (int i=1; i<delta; i++){
+//        b[i] = unboundedOR(a.data(), i+1);
+//    }
 
     //calculate si = all zeros including the group with the first "1" bit and then all ones.
     for (int i=0; i<lambda; i++){
@@ -1944,7 +2021,7 @@ void ProtocolParty<FieldType>::interpolatePolynomial(vector<FieldType>& coeff, c
 }
 
 template <class FieldType>
-FieldType ProtocolParty<FieldType>::evalPolynomial(const vector<FieldType>& coeff, vector<FieldType> & a)
+FieldType ProtocolParty<FieldType>::evalPolynomial(const vector<FieldType>& coeff, FieldType* a)
 // does a Horner evaluation
 {
 
