@@ -1,5 +1,6 @@
 #include <iostream>
 #include "ProtocolParty.h"
+#include "SmallFields.h"
 
 int main(int argc, char* argv[])
 {
@@ -24,10 +25,10 @@ int main(int argc, char* argv[])
         cout << "end main" << '\n';
 
     }
-    else if(fieldType.compare("ZpMersenne61") == 0)
+    else if(fieldType.compare("ZpMersenne13") == 0)
     {
 
-        ProtocolParty<ZpMersenneLongElement> protocol(argc, argv);
+        ProtocolParty<ZpMersenne13> protocol(argc, argv);
         auto t1 = high_resolution_clock::now();
         protocol.run();
         auto t2 = high_resolution_clock::now();
@@ -38,6 +39,18 @@ int main(int argc, char* argv[])
 
     }
 
+    else if(fieldType.compare("Zp16BitPrime") == 0)
+    {
 
+        ProtocolParty<Zp16BitPrime> protocol(argc, argv);
+        auto t1 = high_resolution_clock::now();
+        protocol.run();
+        auto t2 = high_resolution_clock::now();
+
+        auto duration = duration_cast<milliseconds>(t2-t1).count();
+        cout << "time in milliseconds for " << times << " runs: " << duration << endl;
+        cout << "end main" << '\n';
+
+    }
     return 0;
 }

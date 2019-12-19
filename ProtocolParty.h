@@ -164,15 +164,18 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
 
     if(fieldType.compare("ZpMersenne31") == 0) {
         field = new TemplateField<FieldType>(2147483647);
-    } else if(fieldType.compare("ZpMersenne61") == 0) {
-        field = new TemplateField<FieldType>(0);
+    } else if(fieldType.compare("ZpMersenne13") == 0) {
+        field = new TemplateField<FieldType>(8191);
+    }
+    else if(fieldType.compare("Zp16BitPrime") == 0) {
+        field = new TemplateField<FieldType>(8191);
     }
 
     N = numParties;
     T = (numParties+1)/2 - 1;
 
     delta = 8;
-    lambda = 4;
+    lambda = (field->getElementSizeInBits()+7)/8;
 
     MPCCommunication comm;
     string partiesFile = this->getParser().getValueByKey(arguments, "partiesFile");
@@ -458,7 +461,7 @@ void ProtocolParty<FieldType>::comparePhase(){
         aC = randomSharesArray[randomSharesOffset++];
         bC = randomSharesArray[randomSharesOffset++];
 
-        res = compare(aC, bC, 31);
+        res = compare(aC, bC, field->getElementSizeInBits());
         auto end = high_resolution_clock::now();
         auto duration = duration_cast<milliseconds>(end- start).count();
 //        cout << "compare took " << duration << " ms"<<endl;
@@ -1176,7 +1179,7 @@ void ProtocolParty<FieldType>::initializationPhase() {
         twoSquares[i] = twoSquares[i+1]*2;
     }
 
-    numCompares = 100;
+    numCompares = 100 ;
 
 }
 
