@@ -27,8 +27,8 @@ class ZpMersenne13 {
 //private:
 public: //TODO return to private after tesing
 
-    static const unsigned int p = 8191;
-    unsigned int elem;
+    static const unsigned short int p = 8191;
+    unsigned short int elem;
 
 public:
 

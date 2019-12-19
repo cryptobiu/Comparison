@@ -9,7 +9,7 @@ template <>
 TemplateField<ZpMersenne13>::TemplateField(long fieldParam) {
 
     this->fieldParam = 8191;
-    this->elementSizeInBytes = 4;//round up to int. no need to optimize space and communication here
+    this->elementSizeInBytes = 2;//round up to int. no need to optimize space and communication here
     this->elementSizeInBits = 13;
 
     auto randomKey = prg.generateKey(128);
@@ -40,7 +40,7 @@ ZpMersenne13 TemplateField<ZpMersenne13>::GetElement(long b) {
 template <>
 void TemplateField<ZpMersenne13>::elementToBytes(unsigned char* elemenetInBytes, ZpMersenne13& element){
 
-    memcpy(elemenetInBytes, (byte*)(&element.elem), 4);
+    memcpy(elemenetInBytes, (byte*)(&element.elem), 2);
 }
 
 
@@ -54,7 +54,7 @@ void TemplateField<ZpMersenne13>::elementVectorToByteVector(vector<ZpMersenne13>
 template <>
 ZpMersenne13 TemplateField<ZpMersenne13>::bytesToElement(unsigned char* elemenetInBytes){
 
-    return ZpMersenne13((unsigned int)(*(unsigned int *)elemenetInBytes));
+    return ZpMersenne13((unsigned short int)(*(unsigned short int *)elemenetInBytes));
 }
 
 
