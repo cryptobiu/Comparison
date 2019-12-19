@@ -54,6 +54,7 @@ private:
     int randomWithBitsOffset;
 
     int numCompares;
+    int debugDuration;
 
 
     void initializationPhase();
@@ -174,10 +175,10 @@ ProtocolParty<FieldType>::ProtocolParty(int argc, char* argv[]) : MPCProtocol("C
     N = numParties;
     T = (numParties+1)/2 - 1;
 
-//    delta = 4;
-//    lambda = (field->getElementSizeInBits()+3)/4;
-    delta = 5;
-    lambda = 3;
+    delta = stoi(this->getParser().getValueByKey(arguments, "delta"));
+    lambda = stoi(this->getParser().getValueByKey(arguments, "lambda"));
+//    delta = 5;
+//    lambda = 3;
 
     MPCCommunication comm;
     string partiesFile = this->getParser().getValueByKey(arguments, "partiesFile");
@@ -478,7 +479,7 @@ void ProtocolParty<FieldType>::comparePhase(){
     cout<<"a = "<<temp[0]<<endl;
     cout<<"b = "<<temp[1]<<endl;
     cout<<"a < b ? = "<<temp[2]<<endl;
-
+    cout<<"all prefix or took = "<<debugDuration<<endl;
     cout << "compute " <<numCompares<<" compares took " << duration/numCompares << " ms in average"<<endl;
 
 }
@@ -750,7 +751,10 @@ void ProtocolParty<FieldType>::unboundedOR(vector<vector<FieldType>> & shares, i
 //    cout<<endl;
 
     for (int j=0; j<numOfGroups; j++) {
-        resToFill[offset + j] = evalPolynomial(polynomials[sizes[j]-2], A.data() + offsets[j]);
+        if (sizes[j] == 1){
+            resToFill[offset + j] = shares[j][0];
+        }
+         else resToFill[offset + j] = evalPolynomial(polynomials[sizes[j]-2], A.data() + offsets[j]);
     }
 }
 
@@ -976,7 +980,11 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
 
     //compute d[i] = prefix OR of ci
     vector<FieldType> d(size);
+    auto start = high_resolution_clock::now();
     prefixOR(c.data(), d);
+    auto end = high_resolution_clock::now();
+    debugDuration += duration_cast<microseconds>(end- start).count();
+
 //    openShare(d,temp,T);
 //    cout<<"d:"<<endl;
 //    for (int i=0; i<size; i++){
@@ -1231,16 +1239,17 @@ void ProtocolParty<FieldType>::initializationPhase() {
 //    }
 
     int polySize;
-    vector<FieldType> x(delta+1);
-    vector<FieldType> y(delta+1);
+    int max = delta > lambda ? delta : lambda;
+    vector<FieldType> x(max+1);
+    vector<FieldType> y(max+1);
 
-    polynomials.resize(delta-1);
+    polynomials.resize(max-1);
 
-    for (int i = 0; i < delta+1; i++) {
+    for (int i = 0; i < max+1; i++) {
         x[i] = i + 1;
         y[i] = (i == 0) ? 0 : 1;
     }
-    for (int j=2; j<=delta; j++) {
+    for (int j=2; j<=max; j++) {
         polySize = j+1;
         polynomials[j-2].resize(polySize);
 
@@ -1256,7 +1265,8 @@ void ProtocolParty<FieldType>::initializationPhase() {
         twoSquares[i] = twoSquares[i+1]*2;
     }
 
-    numCompares = 100 ;
+    numCompares = 100;
+    debugDuration = 0;
 
 }
 
@@ -1264,7 +1274,7 @@ void ProtocolParty<FieldType>::initializationPhase() {
 template <class FieldType>
 bool ProtocolParty<FieldType>::preparationPhase() {
 
-    int numOfRandomShares = 2*times*numCompares*3*(2*(lambda*delta + (delta*(delta-1))/2 - 1 + (lambda*(lambda-1))/2 - 1) + 31);
+    int numOfRandomShares = 2*times*numCompares*3*(2*(lambda*delta + (delta*(delta-1))/2 - 1 + (lambda*(lambda-1))/2 - 1) + field->getElementSizeInBits());
     randomSharesOffset = 0;
     randomSharesArray.resize(numOfRandomShares);
 
