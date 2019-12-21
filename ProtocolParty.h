@@ -1265,7 +1265,7 @@ void ProtocolParty<FieldType>::initializationPhase() {
         twoSquares[i] = twoSquares[i+1]*2;
     }
 
-    numCompares = 100;
+    numCompares = 1;
     debugDuration = 0;
 
 }
