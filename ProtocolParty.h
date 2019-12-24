@@ -71,8 +71,6 @@ private:
 
     void openShare(vector<FieldType> &shares, vector<FieldType> &secrets, int d);
 
-    void openShareSetRecBuf(vector<FieldType> &shares, vector<FieldType> &secrets, int d, vector<vector<byte>> &recBufsBytes);
-
     void roundFunctionSync(vector<vector<byte>> &sendBufs, vector<vector<byte>> &recBufs, int round);
     void exchangeData(vector<vector<byte>> &sendBufs,vector<vector<byte>> &recBufs, int first, int last);
     void roundFunctionSyncElements(vector<vector<FieldType>> &sendBufs, vector<vector<FieldType>> &recBufs, int round);
@@ -1721,47 +1719,28 @@ void ProtocolParty<FieldType>::DNHonestMultiplication(FieldType *a, FieldType *b
 
 }
 
+
 template <class FieldType>
-void ProtocolParty<FieldType>::openShare(vector<FieldType> &shares, vector<FieldType> &secrets, int d){
-
-
-    vector<vector<byte>> recBufsBytes(N);
-
-    openShareSetRecBuf(shares, secrets, d, recBufsBytes);
-
-}
-template <class FieldType>
-void ProtocolParty<FieldType>::openShareSetRecBuf(vector<FieldType> &shares, vector<FieldType> &secrets,
-                                                  int d, vector<vector<byte>> &recBufsBytes){
+void ProtocolParty<FieldType>::openShare(vector<FieldType> &shares, vector<FieldType> &secrets,
+                                                  int d){
 
     int numOfRandomShares = shares.size();
-    vector<vector<byte>> sendBufsBytes(N);
+    //vector<vector<byte>> sendBufsBytes(N);
+
+    vector<vector<FieldType>> sendBufsElements(N);
+    vector<vector<FieldType>> recBufsElements(N,vector<FieldType>(numOfRandomShares));
 
     vector<FieldType> x1(N);
-    int fieldByteSize = field->getElementSizeInBytes();
 
-    //calc the number of elements needed for 128 bit AES key
-
-    //resize vectors
-    for(int i=0; i < N; i++)
-    {
-        sendBufsBytes[i].resize(numOfRandomShares*fieldByteSize);
-        recBufsBytes[i].resize(numOfRandomShares*fieldByteSize);
-    }
-
-    //set the first sending data buffer
-    for(int j=0; j<numOfRandomShares;j++) {
-        field->elementToBytes(sendBufsBytes[0].data() + (j * fieldByteSize), shares[j]);
-    }
 
     //copy the same data for all parties
-    for(int i=1; i<N; i++){
+    for(int i=0; i<N; i++){
 
-        sendBufsBytes[i] = sendBufsBytes[0];
+        sendBufsElements[i] = shares;
     }
 
     //call the round function to send the shares to all the users and get the other parties share
-    roundFunctionSync(sendBufsBytes, recBufsBytes,12);
+    roundFunctionSyncElements(sendBufsElements, recBufsElements,12);
 
     //reconstruct each set of shares to get the secret
 
@@ -1770,7 +1749,7 @@ void ProtocolParty<FieldType>::openShareSetRecBuf(vector<FieldType> &shares, vec
         //get the set of shares for each element
         for(int i=0; i < N; i++) {
 
-            x1[i] = field->bytesToElement(recBufsBytes[i].data() + (k*fieldByteSize));
+            x1[i] = recBufsElements[i][k];
         }
 
 
