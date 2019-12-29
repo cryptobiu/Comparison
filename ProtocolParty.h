@@ -93,13 +93,16 @@ private:
     void unboundedOR(vector<vector<FieldType>> & shares, int sizeTotal, vector<FieldType> & resToFill, int offset);
     void checkUnboundedOR(FieldType* bits, int numBits);
 
-    void prefixOR(FieldType* shares, vector<FieldType> & bToFill);
+//    void prefixOR(FieldType* shares, vector<FieldType> & bToFill);
+    void prefixOR(vector<vector<FieldType>> & shares, vector<vector<FieldType>> & bToFill);
 
-    FieldType bitwiseLessThan(FieldType* a, FieldType* b, int size);
+//    FieldType bitwiseLessThan(FieldType* a, FieldType* b, int size);
+    void bitwiseLessThan(vector<vector<FieldType>> & a, vector<vector<FieldType>> & b, vector<FieldType> & result);
 
     void geneateRandomWithBits(int size, vector<FieldType> & randomToFill, vector<vector<FieldType>> & bitsToFill, int numRandoms);
-    void getBits(FieldType x, vector<FieldType> & bits, int size);
-    FieldType LSB(FieldType & a, int bitsSize);
+    void getBits(vector<FieldType> & x, vector<vector<FieldType>> & bits, int size);
+//    FieldType LSB(FieldType & a, int bitsSize);
+    void LSB(vector<FieldType> & x, int bitsSize, vector<FieldType> & lsb);
 
     FieldType compare(FieldType & a, FieldType & b, int bitSize);
 
@@ -756,39 +759,47 @@ void ProtocolParty<FieldType>::unboundedOR(vector<vector<FieldType>> & shares, i
     }
 }
 
+
 template <class FieldType>
-void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & bToFill) {
-    int size = bToFill.size();
+void ProtocolParty<FieldType>::prefixOR(vector<vector<FieldType>> & shares, vector<vector<FieldType>> & bToFill) {
+
+    int numVectors = shares.size();
 //    cout<<"original size = "<<size<<endl;
 
     //calculate xi = unbounded or of each delta bits
-    vector<FieldType> x(lambda);
-    vector<FieldType> y(lambda);
-    vector<FieldType> f(lambda);
-    vector<FieldType> s(lambda);
+    vector<FieldType> x(numVectors*lambda);
+    vector<FieldType> y(numVectors*lambda);
+    vector<FieldType> f(numVectors*lambda);
+    vector<FieldType> s(numVectors*lambda);
 
-    vector<vector<FieldType>> sharesVector(lambda);
+    vector<vector<FieldType>> sharesVector(numVectors*lambda);
 
-    int totalSize;
-    //copy the first lambda-1 groups
-    for (int i=0; i<lambda-1; i++){
-        sharesVector[i].resize(delta);
-        memcpy((byte*)sharesVector[i].data(), (byte*)&shares[i*delta], delta*field->getElementSizeInBytes());
+    int totalSize = 0;
+    for (int j=0; j<numVectors; j++) {
+
+        //copy the first lambda-1 groups
+        for (int i = 0; i < lambda - 1; i++) {
+            sharesVector[j*lambda + i].resize(delta);
+            memcpy((byte *) sharesVector[j*lambda + i].data(), (byte *) &shares[j][i * delta],
+                   delta * field->getElementSizeInBytes());
+        }
+        //copy the last gropu. Notice that it can contain less than delta elements
+        int remain = shares[j].size() % delta;
+        if (remain == 0) {
+            sharesVector[j*lambda + lambda - 1].resize(delta);
+            memcpy((byte *) sharesVector[j*lambda + lambda - 1].data(), (byte *) &shares[j][(lambda - 1) * delta],
+                   delta * field->getElementSizeInBytes());
+            totalSize += lambda * delta;
+
+        } else {
+            sharesVector[j*lambda + lambda - 1].resize(remain);
+            memcpy((byte *) sharesVector[j*lambda + lambda - 1].data(), (byte *) &shares[j][(lambda - 1) * delta],
+                   remain * field->getElementSizeInBytes());
+            totalSize += (lambda - 1) * delta + remain;
+        }
     }
-    //copy the last gropu. Notice that it can contain less than delta elements
-    int remain = size % delta;
-    if (remain == 0){
-        sharesVector[lambda-1].resize(delta);
-        memcpy((byte*)sharesVector[lambda-1].data(), (byte*)&shares[(lambda-1)*delta], delta*field->getElementSizeInBytes());
-        totalSize = lambda*delta;
 
-    } else {
-        sharesVector[lambda-1].resize(remain);
-        memcpy((byte*)sharesVector[lambda-1].data(), (byte*)&shares[(lambda-1)*delta], remain*field->getElementSizeInBytes());
-        totalSize = (lambda-1)*delta + remain;
-    }
-
-    vector<FieldType> temp;
+//    vector<FieldType> temp;
 //    cout<<"sharesAlligned:"<<endl;
 //    for (int i=0; i<lambda; i++){
 //        temp.resize(sharesVector[i].size());
@@ -805,6 +816,7 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 //        x[i] = unboundedOR(sharesAlligned + i*delta, delta);
 //    }
 
+//    vector<FieldType> temp;
 //    temp.resize(x.size());
 //    openShare(x,temp,T);
 //    cout<<"x:"<<endl;
@@ -815,14 +827,25 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 
     //calculate yi = prefix or of x
     totalSize = 0;
-    sharesVector.resize(lambda-1);
-    for (int i=0; i<lambda-1; i++){
-        sharesVector[i].resize(i+2);
-        memcpy((byte*)sharesVector[i].data(), (byte*)x.data(), (i+2)*field->getElementSizeInBytes());
-        totalSize += i+2;
+    sharesVector.resize(numVectors*(lambda-1));
+    vector<FieldType> tempToOR(numVectors*(lambda-1));
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < lambda - 1; i++) {
+            sharesVector[j*(lambda-1) + i].resize(i + 2);
+            memcpy((byte *) sharesVector[j*(lambda-1) + i].data(), (byte *) &x[j*lambda], (i + 2) * field->getElementSizeInBytes());
+            totalSize += i + 2;
+        }
+        y[j*lambda] = x[j*lambda];
     }
-    y[0] = x[0];
-    unboundedOR(sharesVector, totalSize, y, 1);
+
+    unboundedOR(sharesVector, totalSize, tempToOR, 0);
+
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < lambda - 1; i++) {
+            y[j*lambda + i + 1] = tempToOR[j*(lambda-1) + i];
+        }
+    }
+
 //    for (int i=1; i<lambda; i++){
 //        y[i] = unboundedOR(x.data(), i+1);
 //    }
@@ -835,69 +858,104 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 //    cout<<endl;
 
     //calculate fi = find the group with the first "1" bit
-    f[0] = y[0];
-    for (int i=1; i<lambda; i++){
-        f[i] = y[i] - y[i-1];
+    for (int j=0; j<numVectors; j++) {
+        f[j*lambda] = y[j*lambda];
+        for (int i = 1; i < lambda; i++) {
+            f[j*lambda + i] = y[j*lambda + i] - y[j*lambda + i - 1];
+        }
     }
+
+//    openShare(f,temp,T);
+//    cout<<"f:"<<endl;
+//    for (int i=0; i<temp.size(); i++){
+//        cout<<temp[i]<<" ";
+//    }
+//    cout<<endl;
 
     //find the real b values for the group which contains the first "1" bit.
     //Note that the group index is unknown
-    vector<FieldType> a(delta, *field->GetZero());
-    vector<FieldType> aToMultiply(lambda);
+    vector<FieldType> a(numVectors * delta, *field->GetZero());
 
-    //TODO can be optimized!!
-    for (int j=0; j<delta; j++){
-//        for (int i=0; i<lambda; i++) {
-//            aToMultiply[i] = sharesAlligned[i * delta + j];
-//        }
+    for (int k=0; k<numVectors;k++) {
+        for (int j = 0; j < delta; j++) {
 
-        for (int i=0; i<lambda-1; i++) {
-            a[j] += f[i]*shares[i * delta + j];
+            for (int i = 0; i < lambda - 1; i++) {
+                a[k*delta + j] += f[k*lambda + i] * shares[k][i * delta + j];
 
-        }
+            }
 
-        if (j<remain){
-            a[j] += f[lambda-1]*shares[(lambda-1) * delta + j];
+            int remain = shares[k].size() % delta;
+            if (j < remain) {
+                a[k*delta + j] += f[k*lambda + lambda - 1] * shares[k][(lambda - 1) * delta + j];
+            }
         }
     }
 
-    DNHonestMultiplication(a.data(), a.data(), a, delta, true);
+    DNHonestMultiplication(a.data(), a.data(), a, numVectors * delta, true);
 
     //calculate the real b values for the group which contains the first "1" bit.
     //Note that the group index is unknown
-    vector<FieldType> b(delta);
+    vector<FieldType> b(numVectors * delta);
 
     totalSize = 0;
-    sharesVector.resize(delta-1);
-    for (int i=0; i<delta-1; i++){
-        sharesVector[i].resize(i+2);
-        memcpy((byte*)sharesVector[i].data(), (byte*)a.data(), (i+2)*field->getElementSizeInBytes());
-        totalSize += i+2;
+    sharesVector.resize(numVectors * (delta-1));
+    tempToOR.resize(numVectors * (delta-1));
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < delta - 1; i++) {
+            sharesVector[j*(delta - 1) + i].resize(i + 2);
+            memcpy((byte *) sharesVector[j*(delta - 1) + i].data(), (byte *) &a[j*delta], (i + 2) * field->getElementSizeInBytes());
+            totalSize += i + 2;
+        }
+        b[j*delta] = a[j*delta];
     }
-    b[0] = a[0];
-    unboundedOR(sharesVector, totalSize, b, 1);
+    unboundedOR(sharesVector, totalSize, tempToOR, 0);
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < delta - 1; i++) {
+            b[j*delta + i + 1] = tempToOR[j*(delta-1) + i];
+        }
+    }
 //    b[0] = a[0];
 //    for (int i=1; i<delta; i++){
 //        b[i] = unboundedOR(a.data(), i+1);
 //    }
 
+//    temp.resize(b.size());
+//    openShare(b,temp,T);
+//    cout<<"b:"<<endl;
+//    for (int i=0; i<temp.size(); i++){
+//        cout<<temp[i]<<" ";
+//    }
+//    cout<<endl;
+
     //calculate si = all zeros including the group with the first "1" bit and then all ones.
-    for (int i=0; i<lambda; i++){
-        s[i] = y[i] - f[i];
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < lambda; i++) {
+            s[j*lambda + i] = y[j*lambda + i] - f[j*lambda + i];
 
-    }
-
-    vector<FieldType> fToMultiply(delta*lambda);
-    vector<FieldType> bToMultiply(delta*lambda);
-    //calculate the real b values:
-    for (int i=0; i<lambda; i++) {
-        for (int j = 0; j < delta; j++) {
-            fToMultiply[i*delta + j] = f[i];
-            bToMultiply[i*delta + j] = b[j];
         }
     }
 
-    DNHonestMultiplication(fToMultiply.data(), bToMultiply.data(), fToMultiply, delta*lambda);
+//    temp.resize(s.size());
+//    openShare(s,temp,T);
+//    cout<<"s:"<<endl;
+//    for (int i=0; i<temp.size(); i++){
+//        cout<<temp[i]<<" ";
+//    }
+//    cout<<endl;
+
+    vector<FieldType> fToMultiply(numVectors*delta*lambda);
+    vector<FieldType> bToMultiply(numVectors*delta*lambda);
+    //calculate the real b values:
+    for (int k = 0; k<numVectors; k++) {
+        for (int i = 0; i < lambda; i++) {
+            for (int j = 0; j < delta; j++) {
+                fToMultiply[k*delta*lambda + i * delta + j] = f[k*lambda + i];
+                bToMultiply[k*delta*lambda + i * delta + j] = b[k*delta + j];
+            }
+        }
+    }
+
+    DNHonestMultiplication(fToMultiply.data(), bToMultiply.data(), fToMultiply, numVectors*delta*lambda);
 
 //        cout<<"fToMultiply:"<<endl;
 //        for (int i=0; i<delta; i++){
@@ -905,15 +963,18 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 //        }
 //        cout<<endl;
 
-    for (int i=0; i<lambda; i++) {
-        if (i<lambda-1) {
-            for (int j = 0; j < delta; j++) {
+    for (int k = 0; k<numVectors; k++) {
+        for (int i = 0; i < lambda; i++) {
+            if (i < lambda - 1) {
+                for (int j = 0; j < delta; j++) {
 
-                bToFill[i * delta + j] = fToMultiply[i * delta + j] + s[i];
-            }
-        } else { //last group
-            for (int j = 0; j < remain; j++) {
-                bToFill[i * delta + j] = fToMultiply[i * delta + j] + s[i];
+                    bToFill[k][i * delta + j] = fToMultiply[k*lambda*delta  + i * delta + j] + s[k*lambda + i];
+                }
+            } else { //last group
+                int remain = shares[k].size() % delta;
+                for (int j = 0; j < remain; j++) {
+                    bToFill[k][i * delta + j] = fToMultiply[k*lambda*delta  + i * delta + j] + s[k*lambda + i];
+                }
             }
         }
     }
@@ -953,48 +1014,257 @@ void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & b
 
 
 }
+//
+//template <class FieldType>
+//void ProtocolParty<FieldType>::prefixOR(FieldType* shares, vector<FieldType> & bToFill) {
+//    int size = bToFill.size();
+////    cout<<"original size = "<<size<<endl;
+//
+//    //calculate xi = unbounded or of each delta bits
+//    vector<FieldType> x(lambda);
+//    vector<FieldType> y(lambda);
+//    vector<FieldType> f(lambda);
+//    vector<FieldType> s(lambda);
+//
+//    vector<vector<FieldType>> sharesVector(lambda);
+//
+//    int totalSize;
+//    //copy the first lambda-1 groups
+//    for (int i=0; i<lambda-1; i++){
+//        sharesVector[i].resize(delta);
+//        memcpy((byte*)sharesVector[i].data(), (byte*)&shares[i*delta], delta*field->getElementSizeInBytes());
+//    }
+//    //copy the last gropu. Notice that it can contain less than delta elements
+//    int remain = size % delta;
+//    if (remain == 0){
+//        sharesVector[lambda-1].resize(delta);
+//        memcpy((byte*)sharesVector[lambda-1].data(), (byte*)&shares[(lambda-1)*delta], delta*field->getElementSizeInBytes());
+//        totalSize = lambda*delta;
+//
+//    } else {
+//        sharesVector[lambda-1].resize(remain);
+//        memcpy((byte*)sharesVector[lambda-1].data(), (byte*)&shares[(lambda-1)*delta], remain*field->getElementSizeInBytes());
+//        totalSize = (lambda-1)*delta + remain;
+//    }
+//
+//    vector<FieldType> temp;
+////    cout<<"sharesAlligned:"<<endl;
+////    for (int i=0; i<lambda; i++){
+////        temp.resize(sharesVector[i].size());
+////        openShare(sharesVector[i],temp,T);
+////        for (int i=0; i<temp.size(); i++){
+////            cout<<temp[i]<<" ";
+////        }
+////    }
+////    cout<<endl;
+////cout<<"before unbounded"<<endl;
+////    cout<<"totalSize = "<<totalSize<<endl;
+//    unboundedOR(sharesVector, totalSize, x, 0);
+////    for (int i=0; i<lambda; i++){
+////        x[i] = unboundedOR(sharesAlligned + i*delta, delta);
+////    }
+//
+////    temp.resize(x.size());
+////    openShare(x,temp,T);
+////    cout<<"x:"<<endl;
+////    for (int i=0; i<temp.size(); i++){
+////        cout<<temp[i]<<" ";
+////    }
+////    cout<<endl;
+//
+//    //calculate yi = prefix or of x
+//    totalSize = 0;
+//    sharesVector.resize(lambda-1);
+//    for (int i=0; i<lambda-1; i++){
+//        sharesVector[i].resize(i+2);
+//        memcpy((byte*)sharesVector[i].data(), (byte*)x.data(), (i+2)*field->getElementSizeInBytes());
+//        totalSize += i+2;
+//    }
+//    y[0] = x[0];
+//    unboundedOR(sharesVector, totalSize, y, 1);
+////    for (int i=1; i<lambda; i++){
+////        y[i] = unboundedOR(x.data(), i+1);
+////    }
+//
+////    openShare(y,temp,T);
+////    cout<<"y:"<<endl;
+////    for (int i=0; i<temp.size(); i++){
+////        cout<<temp[i]<<" ";
+////    }
+////    cout<<endl;
+//
+//    //calculate fi = find the group with the first "1" bit
+//    f[0] = y[0];
+//    for (int i=1; i<lambda; i++){
+//        f[i] = y[i] - y[i-1];
+//    }
+//
+//    //find the real b values for the group which contains the first "1" bit.
+//    //Note that the group index is unknown
+//    vector<FieldType> a(delta, *field->GetZero());
+//    vector<FieldType> aToMultiply(lambda);
+//
+//    //TODO can be optimized!!
+//    for (int j=0; j<delta; j++){
+////        for (int i=0; i<lambda; i++) {
+////            aToMultiply[i] = sharesAlligned[i * delta + j];
+////        }
+//
+//        for (int i=0; i<lambda-1; i++) {
+//            a[j] += f[i]*shares[i * delta + j];
+//
+//        }
+//
+//        if (j<remain){
+//            a[j] += f[lambda-1]*shares[(lambda-1) * delta + j];
+//        }
+//    }
+//
+//    DNHonestMultiplication(a.data(), a.data(), a, delta, true);
+//
+//    //calculate the real b values for the group which contains the first "1" bit.
+//    //Note that the group index is unknown
+//    vector<FieldType> b(delta);
+//
+//    totalSize = 0;
+//    sharesVector.resize(delta-1);
+//    for (int i=0; i<delta-1; i++){
+//        sharesVector[i].resize(i+2);
+//        memcpy((byte*)sharesVector[i].data(), (byte*)a.data(), (i+2)*field->getElementSizeInBytes());
+//        totalSize += i+2;
+//    }
+//    b[0] = a[0];
+//    unboundedOR(sharesVector, totalSize, b, 1);
+////    b[0] = a[0];
+////    for (int i=1; i<delta; i++){
+////        b[i] = unboundedOR(a.data(), i+1);
+////    }
+//
+//    //calculate si = all zeros including the group with the first "1" bit and then all ones.
+//    for (int i=0; i<lambda; i++){
+//        s[i] = y[i] - f[i];
+//
+//    }
+//
+//    vector<FieldType> fToMultiply(delta*lambda);
+//    vector<FieldType> bToMultiply(delta*lambda);
+//    //calculate the real b values:
+//    for (int i=0; i<lambda; i++) {
+//        for (int j = 0; j < delta; j++) {
+//            fToMultiply[i*delta + j] = f[i];
+//            bToMultiply[i*delta + j] = b[j];
+//        }
+//    }
+//
+//    DNHonestMultiplication(fToMultiply.data(), bToMultiply.data(), fToMultiply, delta*lambda);
+//
+////        cout<<"fToMultiply:"<<endl;
+////        for (int i=0; i<delta; i++){
+////            cout<<fToMultiply[i]<<" ";
+////        }
+////        cout<<endl;
+//
+//    for (int i=0; i<lambda; i++) {
+//        if (i<lambda-1) {
+//            for (int j = 0; j < delta; j++) {
+//
+//                bToFill[i * delta + j] = fToMultiply[i * delta + j] + s[i];
+//            }
+//        } else { //last group
+//            for (int j = 0; j < remain; j++) {
+//                bToFill[i * delta + j] = fToMultiply[i * delta + j] + s[i];
+//            }
+//        }
+//    }
+//
+////    openShare(x,x,T);
+////    cout<<"x:"<<endl;
+////    for (int i=0; i<lambda; i++){
+////        cout<<x[i]<<" ";
+////    }
+////    cout<<endl;
+////    openShare(y,y,T);
+////    cout<<"y:"<<endl;
+////    for (int i=0; i<lambda; i++){
+////        cout<<y[i]<<" ";
+////    }
+////    cout<<endl;
+////    openShare(f,f,T);
+////    cout<<"f:"<<endl;
+////    for (int i=0; i<lambda; i++){
+////        cout<<f[i]<<" ";
+////    }
+////    cout<<endl;
+////
+////    openShare(b,b,T);
+////    cout<<"b_i0:"<<endl;
+////    for (int i=0; i<delta; i++){
+////        cout<<b[i]<<" ";
+////    }
+////    cout<<endl;
+////
+////    openShare(s,s,T);
+////    cout<<"s:"<<endl;
+////    for (int i=0; i<lambda; i++){
+////        cout<<s[i]<<" ";
+////    }
+////    cout<<endl;
+//
+//
+//}
 
 
 template <class FieldType>
-FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, int size) {
+void ProtocolParty<FieldType>::bitwiseLessThan(vector<vector<FieldType>> & a, vector<vector<FieldType>> & b, vector<FieldType> & result) {
+    int numVectors = a.size();
+    int size = a[0].size();
 //    vector<FieldType> mults(size);
 //    DNHonestMultiplication(a, b, mults, size);
     FieldType two(2);
 
     //calculate [ci] = [ai]^[bi]
-    vector<FieldType> c(size);
-    for (int i=0; i<size; i++){
-        c[i] = a[i] + b[i];
-        c[i] = c[i] - (two * a[i] * b[i]);
+    vector<vector<FieldType>> c(numVectors, vector<FieldType>(size));
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < size; i++) {
+            c[j][i] = a[j][i] + b[j][i];
+            c[j][i] = c[j][i] - (two * a[j][i] * b[j][i]);
+        }
     }
 
+//    cout<<" in bitwise"<<endl;
 //    vector<FieldType> temp(size);
-//    openShare(c,temp,T);
-//    cout<<"c:"<<endl;
-//    for (int i=0; i<size; i++){
-//        cout<<temp[i]<<" ";
+//    for (int j=0; j<numVectors;j++) {
+//        openShare(c[j], temp, T);
+//        cout << "c:" << endl;
+//        for (int i = 0; i < size; i++) {
+//            cout << temp[i] << " ";
+//        }
+//        cout << endl;
 //    }
-//    cout<<endl;
 
     //compute d[i] = prefix OR of ci
-    vector<FieldType> d(size);
+    vector<vector<FieldType>> d(numVectors, vector<FieldType>(size));
     auto start = high_resolution_clock::now();
-    prefixOR(c.data(), d);
+    prefixOR(c, d);
     auto end = high_resolution_clock::now();
     debugDuration += duration_cast<microseconds>(end- start).count();
 
-//    openShare(d,temp,T);
-//    cout<<"d:"<<endl;
-//    for (int i=0; i<size; i++){
-//        cout<<temp[i]<<" ";
+//    for (int j=0; j<numVectors;j++) {
+//        openShare(d[j], temp, T);
+//        cout << "d:" << endl;
+//        for (int i = 0; i < size; i++) {
+//            cout << temp[i] << " ";
+//        }
+//        cout << endl;
 //    }
-//    cout<<endl;
 
     //compute e = [di]-[di+1]
-    vector<FieldType> e(size);
-    e[0] = d[0];
-    for (int i=1; i<size; i++){
-        e[i] = d[i] - d[i-1];
+    vector<FieldType> e(numVectors*size);
+    for (int j=0; j<numVectors; j++) {
+        e[j*size] = d[j][0];
+        for (int i = 1; i < size; i++) {
+            e[j*size + i] = d[j][i] - d[j][i - 1];
+        }
     }
 //    openShare(e,temp,T);
 //    cout<<"e:"<<endl;
@@ -1003,16 +1273,16 @@ FieldType ProtocolParty<FieldType>::bitwiseLessThan(FieldType* a, FieldType* b, 
 //    }
 //    cout<<endl;
 
-    vector<FieldType> res(1, *field->GetZero());
-    for (int i=0; i<size; i++){
-        res[0] += e[i] * b[i];
+    vector<FieldType> res(numVectors, *field->GetZero());
+    for (int j=0; j<numVectors; j++) {
+        for (int i = 0; i < size; i++) {
+            res[j] += e[j*size + i] * b[j][i];
 //        res += mults[i];
+        }
     }
 
 //    vector<FieldType> mults(size);
-    DNHonestMultiplication(res.data(), res.data(), res, 1, true);
-
-    return res[0];
+    DNHonestMultiplication(res.data(), res.data(), result, numVectors, true);
 }
 
 template <class FieldType>
@@ -1033,70 +1303,89 @@ void ProtocolParty<FieldType>::geneateRandomWithBits(int size, vector<FieldType>
 }
 
 template <class FieldType>
-FieldType ProtocolParty<FieldType>::LSB(FieldType & x, int bitsSize) {
+void ProtocolParty<FieldType>::LSB(vector<FieldType> & x, int bitsSize, vector<FieldType> & lsb) {
 
-    vector<FieldType> rBits = bitsToLSB[randomWithBitsOffset];
-    FieldType r = randomsToLSB[randomWithBitsOffset++];
+    int numElements = x.size();
+//    vector<vector<FieldType>> rBits = bitsToLSB[randomWithBitsOffset];
+//    vector<FieldType> r = randomsToLSB[randomWithBitsOffset++];
 
 //    geneateRandomWithBits(bitsSize, r, rBits);
-
-
-//    vector<FieldType> temp(bitsSize);
-//    openShare(rBits, temp, T);
-//    cout<<"bits of random:"<<endl;
-//    for (int i=0; i<bitsSize; i++){
-//        cout<<temp[i];
-//    }
-//    cout<<endl;
-//    temp[0] = r;
+    vector<FieldType> temp(bitsSize);
+//for (int j=0; j<numElements;j++) {
+//
+////    openShare(bitsToLSB[j], temp, T);
+////    cout << "bits of random:" << endl;
+////    for (int i = 0; i < bitsSize; i++) {
+////        cout << temp[i];
+////    }
+////    cout << endl;
+//    temp[0] = randomsToLSB[j];
 //    openShare(temp, temp, T);
-//    cout<<"r:"<<temp[0]<<endl;
+//    cout << "r:" << temp[0] << endl;
+//}
 
 
-    vector<FieldType> c(1);
-    vector<FieldType> cOpened(1);
-    c[0] = x + r;
+    vector<FieldType> c(numElements);
+    vector<FieldType> cOpened(numElements);
+    for (int i=0; i<numElements; i++) {
+        c[i] = x[i] + randomsToLSB[i];
+    }
     openShare(c, cOpened, T);
 //    cout<<"c:"<<cOpened[0]<<endl;
+//    cout<<"c:"<<cOpened[1]<<endl;
+//    cout<<"c:"<<cOpened[2]<<endl;
 
-    vector<FieldType> cBits(bitsSize);
-    getBits(cOpened[0], cBits, bitsSize);
+    vector<vector<FieldType>> cBits(numElements, vector<FieldType>(bitsSize));
+    getBits(cOpened, cBits, bitsSize);
 
-
-//    openShare(cBits, temp, T);
+//    for (int j=0; j<numElements; j++) {
+//    openShare(cBits[j], temp, T);
 //    cout<<"c bits:"<<endl;
-//    for (int i=0; i<bitsSize; i++){
-//        cout<<temp[i];
+//
+//        for (int i = 0; i < bitsSize; i++) {
+//            cout << temp[i];
+//        }
+//        cout << endl;
+//
 //    }
-//    cout<<endl;
 
     FieldType two(2);
-    FieldType compare = bitwiseLessThan(cBits.data(), rBits.data(), bitsSize);
+    vector<FieldType> compare(numElements);
+    bitwiseLessThan(cBits, bitsToLSB, compare);
 
+//    openShare(compare, temp, T);
+
+//    for (int j=0; j<numElements; j++) {
+//        cout<<"c<r ? "<< temp[j]<<endl;
+//
+//    }
 //    temp[0] = compare;
 //    openShare(temp, temp, T);
 //     cout<<"c<r? "<<temp[0]<<endl;
-    FieldType xorBits0 = cBits[bitsSize - 1] + rBits[bitsSize - 1] - two*cBits[bitsSize - 1]*rBits[bitsSize - 1];
+    vector<FieldType> left(2*numElements);
+    vector<FieldType> right(2*numElements);
+    vector<FieldType> mults(2*numElements);
+
+    for (int i=0; i<numElements; i++) {
+        FieldType xorBits0 = cBits[i][bitsSize - 1] + bitsToLSB[i][bitsSize - 1] - two * cBits[i][bitsSize - 1] * bitsToLSB[i][bitsSize - 1];
 //    temp[0] = xorBits0;
 //    openShare(temp, temp, T);
 //    cout<<"c0 ^ r0 = "<<temp[0]<<endl;
-    vector<FieldType> left(2);
-    vector<FieldType> right(2);
-    vector<FieldType> mults(2);
-    left[0] = compare;
-    right[0] = *field->GetOne()-xorBits0;
-    left[1] = *field->GetOne() - compare;
-    right[1] = xorBits0;
+        left[i*2] = compare[i];
+        right[i*2] = *field->GetOne() - xorBits0;
+        left[i*2 + 1] = *field->GetOne() - compare[i];
+        right[i*2 + 1] = xorBits0;
+    }
 
+    DNHonestMultiplication(left.data(), right.data(), mults, 2*numElements);
 
-    mults[0] = compare * (*field->GetOne()-xorBits0);
-    mults[1] = (*field->GetOne() - compare) * xorBits0;
-    DNHonestMultiplication(left.data(), right.data(), mults, 2);
-    FieldType res = mults[0] + mults[1];
+    for (int i=0; i<numElements; i++) {
+        lsb[i] = mults[i*2] + mults[i*2 + 1];
+    }
 //    temp[0] = res;
 //    openShare(temp, temp, T);
 //    cout<<"res = "<<temp[0]<<endl;
-    return res;
+//    return res;
 
 }
 
@@ -1105,20 +1394,23 @@ FieldType ProtocolParty<FieldType>::compare(FieldType & a, FieldType & b, int bi
 
 
     FieldType two(2);
+    vector<FieldType> toLSB(3);
+    vector<FieldType> lsb(3);
+    toLSB[0] = a*two;
+    toLSB[1] = b*two;
+    toLSB[2] = (a-b)*two;
+    LSB(toLSB, bitSize, lsb);
     //w = [a<p/2]
     vector<FieldType> w(1);
-    w[0] = a*two;
-    w[0] = *field->GetOne() - LSB(w[0], bitSize);
+    w[0] = *field->GetOne() - lsb[0];
 
     //x = [b<p/2]
     vector<FieldType> x(1);
-    x[0] = b*two;
-    x[0] = *field->GetOne() - LSB(x[0], bitSize);
+    x[0] = *field->GetOne() - lsb[1];
 
     //y = [(a-b)<p/2]
     vector<FieldType> y(1);
-    y[0] = (a-b)*two;
-    y[0] = *field->GetOne() - LSB(y[0], bitSize);
+    y[0] = *field->GetOne() - lsb[2];
 
     //compute result = w(x+y-2xy) + 1-y-x+xy
 
@@ -1141,10 +1433,13 @@ FieldType ProtocolParty<FieldType>::compare(FieldType & a, FieldType & b, int bi
 }
 
 template <class FieldType>
-void ProtocolParty<FieldType>::getBits(FieldType x, vector<FieldType> & bits, int size) {
-    for (int i=size-1; i>=0; i--) {
-        bits[i] = x.elem & 1;
-        x.elem =  x.elem >> 1;
+void ProtocolParty<FieldType>::getBits(vector<FieldType> & x, vector<vector<FieldType>> & bits, int size) {
+    int numElements = x.size();
+    for (int j=0; j<numElements; j++) {
+        for (int i = size - 1; i >= 0; i--) {
+            bits[j][i] = x[j].elem & 1;
+            x[j].elem = x[j].elem >> 1;
+        }
     }
 }
 
