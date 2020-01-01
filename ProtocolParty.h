@@ -1288,10 +1288,16 @@ void ProtocolParty<FieldType>::bitwiseLessThan(vector<vector<FieldType>> & a, ve
 template <class FieldType>
 void ProtocolParty<FieldType>::geneateRandomWithBits(int size, vector<FieldType> & randomToFill, vector<vector<FieldType>> & bitsToFill, int numRandoms) {
 
-    randomToFill.resize(numRandoms);
-    bitsToFill.resize(numRandoms);
+    int fullSize = numRandoms*1.1;
+    randomToFill.resize(fullSize);
+    bitsToFill.resize(fullSize);
 
-    for (int j=0; j<numRandoms; j++) {
+    vector<FieldType> toCheck(fullSize);
+    vector<FieldType> rToCheck(fullSize);
+    vector<FieldType> checkResult(fullSize);
+    FieldType p(FieldType::p);
+
+    for (int j=0; j<fullSize; j++) {
         bitsToFill[j].resize(size);
         randomBit(bitsToFill[j]);
 
@@ -1299,7 +1305,33 @@ void ProtocolParty<FieldType>::geneateRandomWithBits(int size, vector<FieldType>
         for (int i = 0; i < size; i++) {
             randomToFill[j] += bitsToFill[j][i] * twoSquares[twoSquares.size() - size + i];
         }
+
+        toCheck[j] = p - randomToFill[j];
+        toCheck[j] = toCheck[j] * randomSharesArray[randomSharesOffset++];
     }
+
+    openShare(toCheck, toCheck, 2*T);
+    vector<int> wrongValuesIndices;
+    vector<int> rightValuesIndicesInSpare;
+    for (int j=0; j<fullSize; j++) {
+        if (j<numRandoms) {
+            if (toCheck[j] == *field->GetZero()) {
+                wrongValuesIndices.push_back(j);
+            }
+        } else {
+            if (toCheck[j] != *field->GetZero()) {
+                rightValuesIndicesInSpare.push_back(j);
+            }
+        }
+    }
+
+    int counter = 0;
+    for (int j=0; j<wrongValuesIndices.size(); j++) {
+        randomToFill[wrongValuesIndices[j]] = randomToFill[rightValuesIndicesInSpare[counter]];
+        memcpy((byte*) bitsToFill[wrongValuesIndices[j]].data(), (byte*) bitsToFill[rightValuesIndicesInSpare[counter++]].data(), size*field->getElementSizeInBytes());
+    }
+
+
 }
 
 template <class FieldType>
@@ -1325,6 +1357,7 @@ void ProtocolParty<FieldType>::LSB(vector<FieldType> & x, int bitsSize, vector<F
 //}
 
 
+    //TODO currently we use just the 3 generates randoms...
     vector<FieldType> c(numElements);
     vector<FieldType> cOpened(numElements);
     for (int i=0; i<numElements; i++) {
